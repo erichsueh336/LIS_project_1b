@@ -1,0 +1,3 @@
+INDEX VERSION 1.126
+/Users/erichsueh336/Documents/Cornell/Courses/Large-Scale_System_CS5300/LIS_project_1b/.metadata/.plugins/org.eclipse.jst.jsp.core/jspsearch/1955289065.index
+/CS5300PJ1/src
