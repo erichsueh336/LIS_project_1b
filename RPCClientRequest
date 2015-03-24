@@ -8,16 +8,16 @@ import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collection;
 
-public class RpcClientRequest extends Thread {
+public class RPCClientRequest extends Thread {
     private int opCode;
     private Collection<IP> ipList;
     private ArrayList<Object> arguments;
-    private RpcMessageReply results = null;
+    private RPCMessageReply results = null;
 
     public final static int SOCKET_TIMEOUT = 2000;
     private static final boolean DEBUG = true;
 
-    public RpcClientRequest(Collection<IP> ipList, int opCode, ArrayList<Object> arguments) {
+    public RPCClientRequest(Collection<IP> ipList, int opCode, ArrayList<Object> arguments) {
         super("ClientRequest");
         this.ipList = ipList;
         this.opCode = opCode;
@@ -26,7 +26,7 @@ public class RpcClientRequest extends Thread {
 
     @Override
     public void run() {
-        int call_ID = RpcServer.getInstance().callID();
+        int call_ID = RPCServer.getInstance().callID();
 
         DatagramSocket rpcSocket = null;
         try {
@@ -39,7 +39,7 @@ public class RpcClientRequest extends Thread {
             results = null;
             return;
         }
-        RpcMessageCall outMsg = new RpcMessageCall(call_ID, opCode, arguments);
+        RPCMessageCall outMsg = new RPCMessageCall(call_ID, opCode, arguments);
         byte[] outBuf = outMsg.toByteStream();
         for( IP address : ipList ) {
             //TODO: Are there cases where the example code breaks?
@@ -51,14 +51,14 @@ public class RpcClientRequest extends Thread {
                 e.printStackTrace();
             }
         }
-        byte [] inBuf = new byte[RpcMessage.BUFFER_SIZE];
+        byte [] inBuf = new byte[RPCMessage.BUFFER_SIZE];
         DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
-        RpcMessageReply inMsg = null;
+        RPCMessageReply inMsg = null;
         try {
             do {
                 recvPkt.setLength(inBuf.length);
                 rpcSocket.receive(recvPkt);
-                inMsg = (RpcMessageReply) RpcMessage.readByteStream(inBuf);
+                inMsg = (RPCMessageReply) RPCMessage.readByteStream(inBuf);
             } while( inMsg.getCallID() != call_ID );
         } catch(InterruptedIOException iioe) {
             if(DEBUG) System.out.println("Requests must have timed out");
@@ -76,7 +76,7 @@ public class RpcClientRequest extends Thread {
     /**
      * Returns the result of the request
      */
-    public RpcMessageReply getReply() {
+    public RPCMessageReply getReply() {
         return results;
     }
 }
