@@ -1,0 +1,97 @@
+package com.cs5300.pj1;
+
+import java.util.ArrayList;
+import java.util.Collection;
+
+public class RpcMessageCall extends RpcMessage {
+    private static final long serialVersionUID = -424650587395225785L;
+    private int opCode;
+    private IP serverID; //Represents the server's IP with correct listening port
+
+    private ArrayList<Object> arguments;
+
+    //OpCodes
+    final public static int READ = 0;
+    final public static int WRITE = 1;
+    final public static int DELETE = 2;
+    final public static int NOOP = 3;
+  
+    public RpcMessageCall(int call_ID, int opCode, ArrayList<Object> arguments) {
+        super(call_ID);
+        this.opCode = opCode;
+        this.arguments = arguments;
+        this.serverID = RpcServer.getInstance().getIPLocal();
+        validatePacket();
+    }
+
+    public ArrayList<Object> getArguments() {
+        return arguments;
+    }
+
+    public int getOpCode() {
+        return opCode;
+    }
+    
+    public IP getServerID() {
+        return serverID;
+    };
+
+    private static RpcMessageReply send(Collection<IP> ipList, int opCode, ArrayList<Object> arguments) {
+        RpcClientRequest client = new RpcClientRequest(ipList, opCode, arguments);
+        
+        client.start();
+        while(client.getState() != Thread.State.TERMINATED);
+        return client.getReply();
+    }
+    
+    public static ReadResult SessionRead(IP ip, String sid, int changeCount) {
+        ArrayList<IP> ipList = new ArrayList<IP>();
+        ipList.add(ip);
+        return SessionRead(ipList, sid, changeCount);
+    }
+    
+    public static ReadResult SessionRead(Collection<IP> ipList, String sid, int changeCount) {
+        ArrayList<Object> arguments = new ArrayList<Object>();
+        arguments.add(sid);
+        arguments.add(changeCount);
+        RpcMessageReply results = send(ipList, READ, arguments);
+        if(results == null || results.getResults() == null)
+            return null;
+        ReadResult readResult = new ReadResult((String)results.getResults().get(0), (Long)results.getResults().get(1), results.getServer());
+        SessionTable.getInstance().cache(sid, readResult, changeCount);
+        return readResult;
+    }
+
+    public static boolean SessionWrite(Collection<IP> ipList, String sid, int changeCount, String data, long discardTime) {
+        ArrayList<Object> arguments = new ArrayList<Object>();
+        arguments.add(sid);
+        arguments.add(changeCount);
+        arguments.add(data);
+        arguments.add(discardTime);
+        return send(ipList, WRITE, arguments) != null;
+    }
+    
+    public static boolean SessionWrite(IP ip, String sid, int changeCount, String data, long discardTime) {
+        ArrayList<IP> ipList = new ArrayList<IP>();
+        ipList.add(ip);
+        return SessionWrite(ipList, sid, changeCount, data, discardTime);
+    }
+
+    public static boolean SessionDelete(Collection<IP> ipList, String sid, int changeCount) {
+        ArrayList<Object> arguments = new ArrayList<Object>();
+        arguments.add(sid);
+        arguments.add(changeCount);
+        return send(ipList, DELETE, arguments) != null;
+    }
+
+    public static boolean NoOp(IP ip) {
+        ArrayList<IP> ips = new ArrayList<IP>();
+        ips.add(ip);
+        return NoOp(ips);
+    }
+    
+    public static boolean NoOp(Collection<IP> ipList) {
+        ArrayList<Object> arguments = new ArrayList<Object>();
+        
+        return send(ipList, NOOP, arguments) != null;
+    }
