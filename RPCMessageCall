@@ -3,7 +3,7 @@ package com.cs5300.pj1;
 import java.util.ArrayList;
 import java.util.Collection;
 
-public class RpcMessageCall extends RpcMessage {
+public class RPCMessageCall extends RPCMessage {
     private static final long serialVersionUID = -424650587395225785L;
     private int opCode;
     private IP serverID; //Represents the server's IP with correct listening port
@@ -16,11 +16,11 @@ public class RpcMessageCall extends RpcMessage {
     final public static int DELETE = 2;
     final public static int NOOP = 3;
   
-    public RpcMessageCall(int call_ID, int opCode, ArrayList<Object> arguments) {
+    public RPCMessageCall(int call_ID, int opCode, ArrayList<Object> arguments) {
         super(call_ID);
         this.opCode = opCode;
         this.arguments = arguments;
-        this.serverID = RpcServer.getInstance().getIPLocal();
+        this.serverID = RPCServer.getInstance().getIPLocal();
         validatePacket();
     }
 
@@ -36,8 +36,8 @@ public class RpcMessageCall extends RpcMessage {
         return serverID;
     };
 
-    private static RpcMessageReply send(Collection<IP> ipList, int opCode, ArrayList<Object> arguments) {
-        RpcClientRequest client = new RpcClientRequest(ipList, opCode, arguments);
+    private static RPCMessageReply send(Collection<IP> ipList, int opCode, ArrayList<Object> arguments) {
+        RPCClientRequest client = new RPCClientRequest(ipList, opCode, arguments);
         
         client.start();
         while(client.getState() != Thread.State.TERMINATED);
@@ -54,7 +54,7 @@ public class RpcMessageCall extends RpcMessage {
         ArrayList<Object> arguments = new ArrayList<Object>();
         arguments.add(sid);
         arguments.add(changeCount);
-        RpcMessageReply results = send(ipList, READ, arguments);
+        RPCMessageReply results = send(ipList, READ, arguments);
         if(results == null || results.getResults() == null)
             return null;
         ReadResult readResult = new ReadResult((String)results.getResults().get(0), (Long)results.getResults().get(1), results.getServer());
