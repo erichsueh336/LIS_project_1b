@@ -2,12 +2,12 @@ package com.cs5300.pj1;
 
 import java.util.ArrayList;
 
-public class RpcMessageReply extends RpcMessage {
+public class RPCMessageReply extends RPCMessage {
     private static final long serialVersionUID = -5962879604671075016L;
     private IP server;
     private ArrayList<Object> results;
 
-    public RpcMessageReply(int callID, ArrayList<Object> results, IP server) {
+    public RPCMessageReply(int callID, ArrayList<Object> results, IP server) {
         super(callID);
         this.results = results;
         this.server = server;
