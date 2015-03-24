@@ -1,0 +1,148 @@
+package com.cs5300.pj1;
+
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.SocketException;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+
+public class RpcServer extends Thread {
+
+    private static RpcServer theServer;
+    private DatagramSocket rpcSocket;
+    private static int callIDCounter;
+    private static IP ipLocal;
+
+    //OpCodes
+    final public static int READ = 0;
+    final public static int WRITE = 1;
+    final public static int DELETE = 2;
+    final public static int NOOP = 3;
+    
+    /**
+     * Private Constructor
+     * Use getInstance() to access
+     */
+    private RpcServer() {
+        super("ServerThread");
+        try {
+            rpcSocket = new DatagramSocket();
+            InetAddress localIP = null;
+            while(localIP == null) {
+                try {
+                    localIP = InetAddress.getLocalHost();
+                } catch (UnknownHostException e) {
+                    e.printStackTrace();
+                }
+            }
+            ipLocal = new IP(localIP, rpcSocket.getLocalPort());
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void run() {
+        try {
+            while(true) {
+                byte[] inBuf = new byte[RpcMessage.BUFFER_SIZE];
+                DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
+                rpcSocket.receive(recvPkt);
+                InetAddress returnAddr = recvPkt.getAddress();
+                int returnPort = recvPkt.getPort();
+                RpcMessageCall recvMessage = (RpcMessageCall) RpcMessage.readByteStream(inBuf);
+                SimpleDB.getInstance().putLocalMember(recvMessage.getServerID());
+                int operationCode = recvMessage.getOpCode(); // get requested operationCode
+                RpcMessage reply = null;
+                switch( operationCode ) {
+                    case 0: // read
+                        reply = SessionRead(recvMessage);
+                        break;
+                    case 1: // write
+                        reply = SessionWrite(recvMessage);
+                        break;
+                    case 2: // delete
+                        reply = SessionDelete(recvMessage);
+                        break;
+                    case 3:
+                        reply = NoOp(recvMessage);
+                        break;
+                }
+
+                byte[] outBuf = reply.toByteStream();
+                // here outBuf should contain the callID and results of the call
+                DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length,
+                        returnAddr, returnPort);
+                rpcSocket.send(sendPkt);
+            }
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static RpcServer getInstance() {
+        if(theServer == null)
+            theServer = new RpcServer();
+        return theServer;
+    }
+
+    public RpcMessageReply SessionRead(RpcMessageCall call) {
+        String sid = (String)call.getArguments().get(0);
+        int changeCount = (Integer)call.getArguments().get(1);
+        SessionTable table = SessionTable.getInstance();
+
+        SessionTable.SessionData entry = table.get(sid, changeCount);
+        ArrayList<Object> results = null;
+        if(entry.version >= changeCount) {
+            results = new ArrayList<Object>();
+            results.add(entry.message);
+            results.add(entry.timestamp);
+        }
+        return new RpcMessageReply(call.getCallID(), results, RpcServer.getInstance().getIPLocal());
+    }
+
+    public RpcMessageReply SessionWrite(RpcMessageCall call) {
+        String sid = (String)call.getArguments().get(0);
+        int changeCount = (Integer)call.getArguments().get(1);
+        String data = (String)call.getArguments().get(2);
+        long discardTime = (Long)call.getArguments().get(3);
+        SessionTable table = SessionTable.getInstance();
+
+        table.put(sid, new SessionTable.SessionData(changeCount, data, discardTime));
+        return new RpcMessageReply(call.getCallID(), new ArrayList<Object>(), RpcServer.getInstance().getIPLocal());
+    }
+
+    public RpcMessageReply SessionDelete(RpcMessageCall call) {
+        String sid = (String)call.getArguments().get(0);
+        int changeCount = (Integer)call.getArguments().get(1);
+        SessionTable table = SessionTable.getInstance();
+        table.destroySession(sid, changeCount);
+
+        return new RpcMessageReply(call.getCallID(), new ArrayList<Object>(), RpcServer.getInstance().getIPLocal());
+    }
+
+    public RpcMessageReply NoOp(RpcMessageCall call) {
+        return new RpcMessageReply(call.getCallID(), new ArrayList<Object>(), RpcServer.getInstance().getIPLocal());
+    }
+
+    /**
+     * Gets a unique callID
+     * @return
+     */
+    public int callID() {
+        if(theServer == null)
+            theServer = new RpcServer();
+        return callIDCounter++;
+    }
+
+    /**
+     * gets the local IP
+     * @return
+     */
+    public IP getIPLocal() {
+        if(theServer == null)
+            theServer = new RpcServer();
+        return ipLocal;
+    }
+}
