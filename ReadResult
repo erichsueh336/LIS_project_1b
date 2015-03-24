@@ -1,0 +1,13 @@
+package com.cs5300.pj1;
+
+public class ReadResult {
+    String data;
+    long discardTime;
+    IP serverID;
+
+    public ReadResult(String data, long discardTime, IP serverID) {
+        this.data = data;
+        this.discardTime = discardTime;
+        this.serverID = serverID;
+    }
+}
