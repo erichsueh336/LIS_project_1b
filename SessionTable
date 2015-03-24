@@ -1,0 +1,136 @@
+package com.cs5300.pj1;
+
+import java.util.Calendar;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+public class SessionTable extends Thread {
+    public static SessionTable table = new SessionTable();
+    
+    public HashMap<String, SessionData> sessionTable = new HashMap<String, SessionData>();
+    public CacheTable cacheTable = new CacheTable();
+    
+    final public static int MAX_CACHE_SIZE = 3;
+
+    public static class SessionData {
+      public int version;
+      public String message;
+      public long timestamp;
+
+      /**
+       * Constructor, for convenience
+       * @param version
+       * @param message
+       * @param timestamp
+       */
+      public SessionData(int version, String message, long timestamp) {
+          this.version = version;
+          this.message = message;
+          this.timestamp = timestamp;
+      }
+
+      @Override
+      public String toString() {
+          return this.version + "_" + this.message + "_" + this.timestamp;
+      }
+    };
+
+    private SessionTable() {};
+
+    /**
+     * Looks up a session
+     * @param sessionID
+     * @return
+     */
+    public synchronized SessionData get(String sessionID, int changeCount) {
+        if(sessionTable.containsKey(sessionID)) {
+        	SessionData entry = sessionTable.get(sessionID);
+            if(entry != null && entry.version >= changeCount)
+                return sessionTable.get(sessionID);
+        }
+        
+        if(cacheTable.containsKey(sessionID)) {
+        	SessionData entry = sessionTable.get(sessionID);
+            if(entry != null && entry.version >= changeCount) {
+            	return cacheTable.get(sessionID);
+            }
+        }
+        return null;
+    }
+
+    public synchronized void cache(String sessionID, ReadResult result, int changeCount) {
+        cacheTable.put(sessionID, new SessionData(changeCount, result.getData(), result.getDiscardTime())); 
+    }
+    
+    /**
+     * Adds a new session to the table
+     * @param sessionID
+     * @param entry
+     */
+    public synchronized void put(String sessionID, SessionData entry) {
+        sessionTable.put(sessionID, entry);
+    }
+
+    public synchronized void destroySession(String sessionID, int version) {
+    	SessionData session = sessionTable.get(sessionID);
+        if(session != null && session.version <= version)
+            sessionTable.remove(session);
+        session = cacheTable.get(sessionID);
+        if(session != null &&session.version <= version)
+            cacheTable.remove(session);
+    }
+
+    /**
+     * Destroys the session with the given ID
+     * @param sessionID
+     */
+    public synchronized void destroySession(String sessionID) {
+        sessionTable.remove(sessionID);
+        cacheTable.remove(sessionID);
+    }
+
+    /**
+     * Removes all sessions that have expired from this table
+     */
+    public synchronized void cleanExpiredSessions() {
+        Date now = Calendar.getInstance().getTime();
+        Iterator<Map.Entry<String, SessionData>> iter = sessionTable.entrySet().iterator();
+        while(iter.hasNext()) {
+            Map.Entry<String, SessionData> next = iter.next();
+            if(new Date(next.getValue().timestamp).before(now)) {
+                iter.remove();
+            }
+        }
+    }
+
+    public static SessionTable getInstance() {
+        return table;
+    }
+
+    @Override
+    public String toString() {
+        return sessionTable.toString();
+    }
+    
+    public void run() {
+        try {
+            Thread.sleep(6000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        cleanExpiredSessions();
+    }
+    
+    private class CacheTable extends LinkedHashMap<String, SessionData> {
+        private static final long serialVersionUID = -7317831993274795114L;
+        protected boolean removeEldestEntry(Map.Entry<String, SessionData> eldest) {
+            if(size() > MAX_CACHE_SIZE){
+                return true;
+            }
+            return false;
+        }
+    }
+}
