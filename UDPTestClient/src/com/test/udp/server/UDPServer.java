@@ -9,16 +9,11 @@ public class UDPServer implements Runnable{
 	protected DatagramSocket serverSocket = null;
 	protected boolean listen = true;
 	
-	public UDPServer() throws IOException {
+	public UDPServer(int port) throws IOException {
         super();
-        serverSocket = new DatagramSocket(8889);
+        serverSocket = new DatagramSocket(port);
     }
 	
-	public static void main(String args[]) throws Exception {
-		System.out.println("Server start.....");
-		(new Thread(new UDPServer())).start();
-	}
-
 	@Override
 	public void run() {
 		byte[] receiveData = new byte[1024];

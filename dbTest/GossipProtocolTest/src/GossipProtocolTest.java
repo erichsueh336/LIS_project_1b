@@ -386,4 +386,4 @@ public class GossipProtocolTest {
 
 		// The end of GossipProtocol class. Do not add any code below this line.
 	}    
-	}
+}

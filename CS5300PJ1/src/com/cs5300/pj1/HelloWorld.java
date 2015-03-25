@@ -1,9 +1,13 @@
 package com.cs5300.pj1;
 
 import java.io.*;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 //import java.io.PrintWriter;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -17,6 +21,15 @@ import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+
+
+
+
+
+
+
+
+
 
 
 
@@ -38,7 +51,7 @@ public class HelloWorld extends HttpServlet {
     private static final long serialVersionUID = 1L;
     
     // Local Data Table
-    private static Map<String, SessionData> data_table = new HashMap<String, SessionData>();
+    private static Map<String, SessionData> session_table = new HashMap<String, SessionData>();
     private static Map<String, ServerStatus> group_view = new HashMap<String, ServerStatus>();
     
     // Parameters
@@ -64,8 +77,11 @@ public class HelloWorld extends HttpServlet {
         startViewExchange(view_exchange_period);
         local_IP = getLocalIP(isLocal);
         System.out.println("Local IP = " + local_IP);
+        
+        // UDP server initialize
         startUDPServer(UDP_port);
-        // add local server into view
+        
+        // Add local server into view
         group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
     }
 
@@ -118,33 +134,34 @@ public class HelloWorld extends HttpServlet {
             sess_num++; // increment session number for future session
             Cookie new_cookie = new Cookie(cookie_name, cookie_value); // create cookie
             new_cookie.setMaxAge(sess_timeout_secs); // set timeout to one hour
-            response.addCookie(new_cookie); // add cookie to data_table
+            response.addCookie(new_cookie); // add cookie to session_table
             
-            data_table.put(cookie_value, new SessionData(0, "Hello new user!!", System.currentTimeMillis()  + sess_timeout_secs));
+            session_table.put(cookie_value, new SessionData(0, "Hello new user!!", System.currentTimeMillis()  + sess_timeout_secs));
             
-            cookie_str = data_table.get(cookie_value).getMessage();
-            cookie_timeout = String.valueOf(data_table.get(cookie_value).getTimestamp());
+            cookie_str = session_table.get(cookie_value).getMessage();
+            cookie_timeout = String.valueOf(session_table.get(cookie_value).getTimestamp());
         } else { // returned user
             
             // action control
             String act = request.getParameter("act");
             String[] cookie_value_token = c.getValue().split("_");
             String sessionID = cookie_value_token[0] + "_" + cookie_value_token[1];
-            //int version_number = Integer.parseInt(cookie_value_token[2]);
+            int version_number = Integer.parseInt(cookie_value_token[2]);
             String primary_server = cookie_value_token[3];
             String backup_server = cookie_value_token[4];
             SessionData sessionData = null;
             // token format: < sess_num, SvrID, version, SvrIDprimary, SvrIDbackup >
             if (primary_server.equals(local_IP) || backup_server.equals(local_IP)) {
                 // session data is in local table
-                sessionData = data_table.get(sessionID);
+                sessionData = session_table.get(sessionID);
                 
                 // TODO what if the version in data table is smaller than version from cookie?????
             }
             else { // session data not exists in local session table
                 
                 // TODO Perform RPC sessionRead to primary and backup concurrently
-                
+            	RPCSessionRead(sessionID, version_number, primary_server, backup_server);
+            	
                 // TODO If request failed, return an HTML page with a message "session timeout or failed"
                 
                 // TODO Delete cookie for the bad session
@@ -164,14 +181,14 @@ public class HelloWorld extends HttpServlet {
                     sessionData.setTimestamp(System.currentTimeMillis() + sess_timeout_secs);
                     cookie_str = sessionData.getMessage();
                     cookie_timeout = String.valueOf(sessionData.getTimestamp());
-                    data_table.put(sessionID, sessionData); // replace old data with same key
+                    session_table.put(sessionID, sessionData); // replace old data with same key
                 }
                 else if (act.equals("Refresh")) { // Refresh button was pressed
                     test = "Refresh";
                     // Redisplay the session message, with an updated session expiration time;
                     sessionData.setTimestamp(System.currentTimeMillis() + sess_timeout_secs);
                     c.setMaxAge(sess_timeout_secs); 		// reset cookie timeout to one hour
-                    data_table.put(sessionID, sessionData); // replace old data with same key
+                    session_table.put(sessionID, sessionData); // replace old data with same key
                     
                     // Display message
                     cookie_str = sessionData.getMessage();
@@ -199,7 +216,7 @@ public class HelloWorld extends HttpServlet {
                         sc.close();
                     }
                     c.setMaxAge(sess_timeout_secs); 		// reset cookie timeout to one hour
-                    data_table.put(sessionID, sessionData); // replace old data with same key
+                    session_table.put(sessionID, sessionData); // replace old data with same key
                     
                     // Display message
                     cookie_str = sessionData.getMessage();
@@ -207,7 +224,7 @@ public class HelloWorld extends HttpServlet {
                 }
                 else if (act.equals("Logout")) {    // Logout button was pressed
                     test = "Logout";
-                    data_table.remove(sessionID); 	// remove cookie information from table
+                    session_table.remove(sessionID); 	// remove cookie information from table
                     c.setMaxAge(0); 				// Terminate the session
                     
                     // Display message
@@ -232,7 +249,7 @@ public class HelloWorld extends HttpServlet {
 
                 // Response fail
                 // Update view with < SvrID, down, now >
-                // Create new cookie with backup = NULL 
+                // Create new cookie with backup = NULL
             }
         }
         
@@ -247,7 +264,7 @@ public class HelloWorld extends HttpServlet {
      * @see HttpServlet#doPost(HttpServletRequest request, HttpServletResponse response)
      */
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        // TODO Auto-generated method stub
+        // Auto-generated method stub
     }
     
     // helper functions
@@ -293,7 +310,7 @@ public class HelloWorld extends HttpServlet {
             @Override
             public void run() {
                 // Iterate through session table
-            	Iterator<Map.Entry<String, SessionData>> it = data_table.entrySet().iterator();
+            	Iterator<Map.Entry<String, SessionData>> it = session_table.entrySet().iterator();
             	long currentTime = System.currentTimeMillis();
             	while (it.hasNext()) {
                     Map.Entry<String, SessionData> sessData = it.next();
@@ -357,19 +374,6 @@ public class HelloWorld extends HttpServlet {
     }
     
     /**
-	 * Start UDP server for RPC
-	 * 
-	 * @param port start server on port
-     * @throws IOException 
-	 **/
-    public void startUDPServer(int port) throws IOException {
-        System.out.println("=======================================");
-        System.out.println("    UDP server started at port " + UDP_port);
-        System.out.println("=======================================");
-		(new Thread(new UDPServer(port))).start();
-    }
-    
-    /**
 	 * Get server local IP from network interface(local test) or terminal command(AWS)
 	 * 
 	 * @param isLocal true, if perform local test. false when deployed to AWS
@@ -428,6 +432,253 @@ public class HelloWorld extends HttpServlet {
         }
     	
     	return null;
+    }
+    
+    /**
+	 * Start UDP server for RPC
+	 * 
+	 * @param port start server on port
+     * @throws IOException
+     * @throws SocketException 
+	 **/
+    public void startUDPServer(final int port) throws IOException {
+        System.out.println("=======================================");
+        System.out.println("    UDP server started at port " + UDP_port);
+        System.out.println("=======================================");
+		
+		Thread UDPthread = new Thread() {
+            public void run() {
+    	        try {
+    	        	@SuppressWarnings("resource")
+					DatagramSocket rpcSocket = new DatagramSocket(port);
+            		while(true) {
+
+        	        	byte[] inBuf = new byte[1024];
+        	    		byte[] outBuf = null;
+        	    		DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
+        		        rpcSocket.receive(recvPkt);
+        		        
+        		        InetAddress IPAddress = recvPkt.getAddress();
+        		        int returnPort = recvPkt.getPort();
+        		        String recv_string = new String(recvPkt.getData());
+        		        String[] recv_string_token = recv_string.split("_");
+        		        int operationCode = Integer.parseInt(recv_string_token[1]);
+        		        
+        		        switch (operationCode) {
+        					case 0: // sessionRead
+        						// accepts call arguments and returns call results
+        						outBuf = serverSessionRead(recvPkt.getData(), recvPkt.getLength());
+        						break;
+        					
+        					case 1: // sessionWrite
+        						outBuf = serverSessionWrite(recvPkt.getData(), recvPkt.getLength());
+        						break;
+        					
+        					case 2: // exchangeView
+        						outBuf = serverExchangeView(recvPkt.getData(), recvPkt.getLength());
+        						break;
+        						
+        					default: // error occur
+        						System.out.println("receive unknown operation!!!!");
+        						break;
+        				}
+        		        
+        		        DatagramPacket sendPacket = new DatagramPacket(outBuf, outBuf.length, IPAddress, returnPort);
+        		        rpcSocket.send(sendPacket);
+            		}
+    	        } catch (Exception e) {
+    	        	e.printStackTrace();
+    	        }
+            }
+         };
+         UDPthread.start();
+    }
+    
+    /**TODO
+	 * Server RPC to send out session data requested for function RPCSessionRead
+	 * 
+	 * @param pktData
+	 * @param pktLen
+	 * 
+	 * @return recvStr receive data string
+	 **/
+    public byte[] serverSessionRead(byte[] pktData, int pktLen) {
+		
+		return null;
+	}
+    
+    /**TODO
+	 * Server RPC to write received session data into server session table
+	 * 
+	 * @param pktData
+	 * @param pktLen
+	 * 
+	 * @return recvStr receive data string
+	 **/
+	public byte[] serverSessionWrite(byte[] pktData, int pktLen) {
+		
+		return null;
+	}
+	
+	/**TODO
+	 * Server RPC to return view for function RPCViewExchange
+	 * 
+	 * @param pktData
+	 * @param pktLen
+	 * 
+	 * @return recvStr receive data string
+	 **/
+	public byte[] serverExchangeView(byte[] pktData, int pktLen) {
+		// Exchange view
+		return null;
+	}
+    
+    /**TODO
+	 * RPC to read session data which is not in local session table
+	 * 
+	 * @param sessionID
+	 * @param version_number session data version number
+	 * @param primary_IP session data primary storage
+	 * @param backup_IP session data backup storage
+	 * 
+	 * @return recvStr receive data string
+     * @throws IOException 
+	 **/
+    public String RPCSessionRead(String sessionID, int version_num, String primary_IP, String backup_IP) throws IOException {
+    	DatagramSocket rpcSocket = new DatagramSocket();
+    	byte[] outBuf = new byte[1024];
+    	byte[] inBuf = new byte[1024];
+    	
+    	String return_string = null;
+    	int received_version_num = -1;
+    	int received_call_ID = -1;
+    	int local_call_ID = RPC_call_ID;
+    	
+    	// Increment call ID for next RPC
+    	RPC_call_ID++;
+    	
+    	// message = callID + operation code + arguments
+    	String message = String.valueOf(local_call_ID) + "_0_" + sessionID; 
+    	outBuf = message.getBytes();
+    	
+    	// Send to primary server
+    	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(primary_IP), UDP_port);
+    	rpcSocket.send(sendPkt);
+    	
+    	// Send to backup server
+    	sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(backup_IP), UDP_port);
+    	rpcSocket.send(sendPkt);
+    	
+    	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
+    	try {
+    		do {
+    			recvPkt.setLength(inBuf.length);
+    			rpcSocket.receive(recvPkt);
+    			return_string = new String(recvPkt.getData());
+    			
+    			// Received data format = operation + cookie value + sessionData
+    			// cookie value = sessionID(ip+num) + version + primary + backup
+    			received_call_ID = Integer.parseInt( (return_string.split("_"))[0] );
+    			received_version_num = Integer.parseInt( (return_string.split("_"))[3] );
+    			
+    		} while (received_call_ID != local_call_ID && version_num != received_version_num);
+    	} catch (SocketTimeoutException stoe) {
+    		// RPC timeout, return null string
+    		return_string = null;
+    		recvPkt = null;
+    	} catch(IOException ioe) {
+    		// other error
+    	}
+    	rpcSocket.close();
+    	return return_string;
+    }
+    
+    /**TODO
+	 * RPC to read session data which is not in local session table
+	 * 
+	 * @param sessionID
+	 * 
+	 * @return recvStr receive data string
+     * @throws IOException 
+	 **/
+    public String RPCSessionWrite(String sessionID, ArrayList<String> destAddr) throws IOException {
+    	DatagramSocket rpcSocket = new DatagramSocket();
+    	byte[] outBuf = new byte[1024];
+    	byte[] inBuf = new byte[1024];
+    	String return_string = null;
+    	int received_call_ID = -1;
+    	int local_call_ID = RPC_call_ID;
+    	
+    	RPC_call_ID++;
+		// message = callID + operation code + cookie value + session data
+    	String message = String.valueOf(local_call_ID) + "_0_" + sessionID; 
+    	outBuf = message.getBytes();
+    	
+    	for (String addr : destAddr) {
+    		DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(addr), UDP_port);
+    		rpcSocket.send(sendPkt);
+    	}
+    	
+    	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
+    	try {
+    		do {
+    			recvPkt.setLength(inBuf.length);
+    			rpcSocket.receive(recvPkt);
+    			return_string = new String(recvPkt.getData());
+    			received_call_ID = Integer.parseInt( (return_string.split("_"))[0] );
+    		} while (received_call_ID != local_call_ID);
+    	} catch (SocketTimeoutException stoe) {
+    		// timeout
+    		recvPkt = null;
+    	} catch(IOException ioe) {
+    		// other error
+    	}
+    	rpcSocket.close();
+    	return return_string;
+    }
+    
+    /**TODO
+	 * RPC to exchange view with target server or simpleDB
+	 * 
+	 * @param sessionID
+	 * 
+	 * @return recvStr receive data string
+     * @throws IOException 
+	 **/
+    public String RPCViewExchange(String sessionID, ArrayList<String> destAddr) throws IOException {
+    	DatagramSocket rpcSocket = new DatagramSocket();
+    	byte[] outBuf = new byte[1024];
+    	byte[] inBuf = new byte[1024];
+    	String return_string = null;
+    	int received_call_ID = -1;
+    	int local_call_ID = RPC_call_ID;
+    	
+    	RPC_call_ID++;
+		// message = callID + operation code + cookie value + session data
+    	String message = String.valueOf(local_call_ID) + "_0_" + sessionID; 
+    	outBuf = message.getBytes();
+    	
+    	for (String addr : destAddr) {
+    		DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(addr), UDP_port);
+    		rpcSocket.send(sendPkt);
+    	}
+    	
+    	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
+    	try {
+    		do {
+    			recvPkt.setLength(inBuf.length);
+    			rpcSocket.receive(recvPkt);
+    			return_string = new String(recvPkt.getData());
+    			received_call_ID = Integer.parseInt( (return_string.split("_"))[0] );
+    		} while (received_call_ID != local_call_ID);
+    	} catch (SocketTimeoutException stoe) {
+    		// timeout
+    		recvPkt = null;
+    	} catch(IOException ioe) {
+    		// other error
+    	}
+    	rpcSocket.close();
+    	return return_string;
     }
 
 }
