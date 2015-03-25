@@ -42,7 +42,6 @@ public class RPCClientRequest extends Thread {
         RPCMessageCall outMsg = new RPCMessageCall(call_ID, opCode, arguments);
         byte[] outBuf = outMsg.toByteStream();
         for( IP address : ipList ) {
-            //TODO: Are there cases where the example code breaks?
             if(DEBUG) System.out.println("Sending a request to:" + address);
             DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, address.getIp(), address.getPort());
             try {
