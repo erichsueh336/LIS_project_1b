@@ -284,6 +284,82 @@ public class HelloWorld extends HttpServlet {
         }
         return null;
     }
+
+	/**
+	 * Define a class to use AwsCredentials file.
+	 */
+	public static class GetViewFromSimpleDB {
+		public boolean run() throws IOException {
+			final AmazonSimpleDB sdb = new AmazonSimpleDBClient(new PropertiesCredentials(
+						GetViewFromSimpleDB.class.getResourceAsStream("AwsCredentials.properties")));
+
+			System.out.println("===========================================");
+			System.out.println("Getting Started with Amazon SimpleDB");
+			System.out.println("===========================================\n");
+
+			// Get view
+			System.out.println("Checking if the domain " + domain_name + " exists in your account:\n");
+
+			int isExistViews = 0; // domain
+
+			for (String domainName : sdb.listDomains().getDomainNames()) {
+				if (domain_name.equals(domainName)) {
+					isExistViews = 1;
+					break;
+				}
+			}
+			if (isExistViews == 0) {
+				System.out.println("domain " + domain_name + " does not exist in simpleDB.\n");
+				// Create domain
+				System.out.println("Creating domain called " + domain_name + ".\n");
+				sdb.createDomain(new CreateDomainRequest(domain_name));
+
+				// Add current server into DB view
+				List<ReplaceableItem> sampleData = new ArrayList<ReplaceableItem>();
+				sampleData.add(new ReplaceableItem().withName("view").withAttributes(
+							new ReplaceableAttribute().withName("viewString")
+							.withValue(local_IP + "_UP_" + String.valueOf(System.currentTimeMillis()))));
+				sdb.batchPutAttributes(new BatchPutAttributesRequest(domain_name, sampleData));
+			} else {
+				System.out.println("Domain " + domain_name + " exists in simpleDB.\n");
+				System.out.println("Download view from simpleDB.\n");
+				// Select data from a domain
+				// Notice the use of backticks around the domain name in our select expression.
+				String selectExpression = "select * from `" + domain_name + "`";
+				System.out.println("Selecting: " + selectExpression + "\n");
+				SelectRequest selectRequest = new SelectRequest(selectExpression);
+
+				// download simpleDB data
+				String viewString = null;
+				for (Item item : sdb.select(selectRequest).getItems()) {
+					if (item.getName().equals("view")) {
+						for (Attribute attribute : item.getAttributes()) {
+							viewString = attribute.getValue();
+						}
+						break; // there are only one item named view in this domain.
+					}
+				}
+
+				// Format viewString and put view into group_view
+				mergeViewStringToLocalView(viewString);
+
+				// Put updated view back to DB
+				ReplaceableAttribute replaceableAttribute = new ReplaceableAttribute()
+					.withName("viewString").withValue(getLocalViewString()).withReplace(true);
+
+				sdb.putAttributes(new PutAttributesRequest()
+						.withDomainName(domain_name)
+						.withItemName("view")
+						.withAttributes(replaceableAttribute));			
+
+				// View retrieval success
+				return true;
+			}
+
+			// fail to get view
+			return false;
+		}
+	}
     
     // TODO Connect simpleDB to retrieve view
     /**
@@ -291,74 +367,8 @@ public class HelloWorld extends HttpServlet {
      * @throws IOException 
 	 **/
     public boolean getViewFromSimpleDB() throws IOException {
-    	final AmazonSimpleDB sdb = new AmazonSimpleDBClient(new PropertiesCredentials(
-				HelloWorld.class.getResourceAsStream("AwsCredentials.properties")));
-
-		System.out.println("===========================================");
-		System.out.println("Getting Started with Amazon SimpleDB");
-		System.out.println("===========================================\n");
-    	
-		// Get view
-		System.out.println("Checking if the domain " + domain_name + " exists in your account:\n");
-		
-		int isExistViews = 0; // domain
-			
-		for (String domainName : sdb.listDomains().getDomainNames()) {
-			if (domain_name.equals(domainName)) {
-				isExistViews = 1;
-				break;
-			}
-		}
-		if (isExistViews == 0) {
-			System.out.println("domain " + domain_name + " does not exist in simpleDB.\n");
-			// Create domain
-			System.out.println("Creating domain called " + domain_name + ".\n");
-			sdb.createDomain(new CreateDomainRequest(domain_name));
-
-			// Add current server into DB view
-			List<ReplaceableItem> sampleData = new ArrayList<ReplaceableItem>();
-			sampleData.add(new ReplaceableItem().withName("view").withAttributes(
-	                new ReplaceableAttribute().withName("viewString")
-	                .withValue(local_IP + "_UP_" + String.valueOf(System.currentTimeMillis()))));
-			sdb.batchPutAttributes(new BatchPutAttributesRequest(domain_name, sampleData));
-		} else {
-			System.out.println("Domain " + domain_name + " exists in simpleDB.\n");
-			System.out.println("Download view from simpleDB.\n");
-			// Select data from a domain
-			// Notice the use of backticks around the domain name in our select expression.
-			String selectExpression = "select * from `" + domain_name + "`";
-			System.out.println("Selecting: " + selectExpression + "\n");
-			SelectRequest selectRequest = new SelectRequest(selectExpression);
-
-			// download simpleDB data
-			String viewString = null;
-			for (Item item : sdb.select(selectRequest).getItems()) {
-				if (item.getName().equals("view")) {
-					for (Attribute attribute : item.getAttributes()) {
-						viewString = attribute.getValue();
-					}
-					break; // there are only one item named view in this domain.
-				}
-			}
-			
-			// Format viewString and put view into group_view
-			mergeViewStringToLocalView(viewString);
-			
-			// Put updated view back to DB
-			ReplaceableAttribute replaceableAttribute = new ReplaceableAttribute()
-            	.withName("viewString").withValue(getLocalViewString()).withReplace(true);
-			
-			sdb.putAttributes(new PutAttributesRequest()
-            	.withDomainName(domain_name)
-            	.withItemName("view")
-            	.withAttributes(replaceableAttribute));			
-			
-			// View retrieval success
-			return true;
-		}
-		
-        // fail to get view
-        return false;
+		GetViewFromSimpleDB x = new GetViewFromSimpleDB();
+		return x.run();
     }
     
     /**
@@ -423,7 +433,7 @@ public class HelloWorld extends HttpServlet {
 	            			
 	            			
 	            			final AmazonSimpleDB sdb = new AmazonSimpleDBClient(new PropertiesCredentials(
-	            					HelloWorld.class.getResourceAsStream("AwsCredentials.properties")));
+	            					GetViewFromSimpleDB.class.getResourceAsStream("AwsCredentials.properties")));
 
 	            			System.out.println("===========================================");
 	            			System.out.println("Getting Started with Amazon SimpleDB");
@@ -849,7 +859,7 @@ public class HelloWorld extends HttpServlet {
     	return backup_ip;
     }
     
-    public void mergeViewStringToLocalView(String viewString) {
+    public static void mergeViewStringToLocalView(String viewString) {
     	String[] tokens = viewString.split("_");
     	int num_views = tokens.length / 3;
     	for (int i = 0; i < num_views; i++) {
@@ -863,7 +873,7 @@ public class HelloWorld extends HttpServlet {
     	}
     }
     
-    public String getLocalViewString() {
+    public static String getLocalViewString() {
     	StringBuilder sb = new StringBuilder();
     	for (Map.Entry<String, ServerStatus> entry : group_view.entrySet()) {
     		sb.append(entry.getKey() + "_");
