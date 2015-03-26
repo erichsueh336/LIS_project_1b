@@ -53,7 +53,7 @@ public class HelloWorld extends HttpServlet {
     private static int garbage_collect_period = 600; 	// Time to run garbage collection again
     private static int view_exchange_period = 600; 		// Time to run view exchange thread again
     private static int sess_num = 0;					// Part of session ID
-    private static int sess_timeout_secs = 20 * 000;
+    private static int sess_timeout_secs = 2000 * 1000;
 //    private static int sess_timeout_secs = 1800000; 	// Default session timeout duration
     private static int UDP_port = 5300;					// Default UDP port
     private static int RPC_call_ID = 0;					// RPC call ID, increment after each call
@@ -75,7 +75,7 @@ public class HelloWorld extends HttpServlet {
         
 //        connectedToDB = getViewFromSimpleDB();
         startGarbageCollect(garbage_collect_period);
-        startViewExchange(view_exchange_period);
+//        startViewExchange(view_exchange_period);
     }
 
     /**
@@ -88,7 +88,7 @@ public class HelloWorld extends HttpServlet {
     	
     	
     	// initialization
-        String cookie_str = "Hello new user!!";
+        String cookie_str = "Hello New User!!";
         String cookie_timeout = "";
         String test = "";
         
@@ -283,7 +283,7 @@ public class HelloWorld extends HttpServlet {
         request.setAttribute("test", test);
         request.setAttribute("cookie_str", cookie_str);
         request.setAttribute("cookie_timeout", cookie_timeout);
-        request.getRequestDispatcher("/HelloWorld.jsp").forward(request, response);
+        request.getRequestDispatcher("/index.jsp").forward(request, response);
     }
 
     /**
