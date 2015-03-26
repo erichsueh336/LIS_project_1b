@@ -71,6 +71,8 @@ public class HelloWorld extends HttpServlet {
         
         // UDP server initialize
         startUDPServer(UDP_port);
+		// Add current server into local view
+		group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );        
         
         connectedToDB = getViewFromSimpleDB();
         startGarbageCollect(garbage_collect_period);
@@ -319,9 +321,6 @@ public class HelloWorld extends HttpServlet {
 	                new ReplaceableAttribute().withName("viewString")
 	                .withValue(local_IP + "_UP_" + String.valueOf(System.currentTimeMillis()))));
 			sdb.batchPutAttributes(new BatchPutAttributesRequest(domain_name, sampleData));
-
-			// Add current server into local view
-			group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
 		} else {
 			System.out.println("Domain " + domain_name + " exists in simpleDB.\n");
 			System.out.println("Download view from simpleDB.\n");
@@ -338,14 +337,21 @@ public class HelloWorld extends HttpServlet {
 					for (Attribute attribute : item.getAttributes()) {
 						viewString = attribute.getValue();
 					}
+					break; // there are only one item named view in this domain.
 				}
 			}
 			
-			// Add current server into local view
-			group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
-			
 			// Format viewString and put view into group_view
 			mergeViewStringToLocalView(viewString);
+			
+			// Put updated view back to DB
+			ReplaceableAttribute replaceableAttribute = new ReplaceableAttribute()
+            	.withName("viewString").withValue(getLocalViewString()).withReplace(true);
+			
+			sdb.putAttributes(new PutAttributesRequest()
+            	.withDomainName(domain_name)
+            	.withItemName("view")
+            	.withAttributes(replaceableAttribute));			
 			
 			// View retrieval success
 			return true;
@@ -408,7 +414,6 @@ public class HelloWorld extends HttpServlet {
 	                	
 	            		int rand = random.nextInt(good_server_list.size());
 	            		String randomBackupServerIP = good_server_list.get(rand);
-	            		good_server_list.remove(rand); // removed server IP that has been chosen
 	            		
 	            		if (randomBackupServerIP.equals("simpleDB")) {
 	                        // Read ViewSDB from SimpleDB.
@@ -440,6 +445,7 @@ public class HelloWorld extends HttpServlet {
             						for (Attribute attribute : item.getAttributes()) {
             							viewString = attribute.getValue();
             						}
+            						break; // there are only one item named view in this domain.
             					}
             				}
             				
@@ -788,6 +794,7 @@ public class HelloWorld extends HttpServlet {
     	} catch (SocketTimeoutException stoe) {
     		// timeout
     		recvPkt = null;
+    		rpcSocket.close();
     		return null;
     	} catch(IOException ioe) {
     		// other error
@@ -848,7 +855,7 @@ public class HelloWorld extends HttpServlet {
     	for (int i = 0; i < num_views; i++) {
     		String ip = tokens[i*3];
     		String status = tokens[i*3+1];
-    		int timeStamp = Integer.valueOf(tokens[i*3+2]);
+    		long timeStamp = Integer.valueOf(tokens[i*3+2]);
     		if (!group_view.containsKey(ip) || group_view.get(ip).getTimeStamp() < timeStamp) {
     			// Add non-exist or out of date view
     			group_view.put(ip, new ServerStatus(status, timeStamp));
