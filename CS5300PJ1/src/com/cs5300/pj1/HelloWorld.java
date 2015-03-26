@@ -115,8 +115,10 @@ public class Hello_World extends HttpServlet {
             	
             	// Write to backup server
 //            	RPC: sessionWrite(sessID, version, data, discard_time)
-            	SessionData new_data = new SessionData()
-            	RPCSessionWrite(sessID, randomServerIP, new_data);
+            	ArrayList<String> iplist = new ArrayList<String>();
+            	iplist.add(randomServerIP);
+            	SessionData new_data = new SessionData(0, "Hello, new user!", sess_timeout_secs);
+            	RPCSessionWrite(sessID, iplist, new_data);
             	// Construct cookie
             	cookie_value = String.valueOf(sess_num) + "_" + local_IP + "_0_" 
                         + local_IP + "_" + randomServerIP;
@@ -237,9 +239,10 @@ public class Hello_World extends HttpServlet {
                     cookie_timeout = "Expired";
                 }
                 response.addCookie(c); // put cookie in response
-                
+                long discard_time = System.currentTimeMillis() + sess_timeout_secs + delta;
+                sessionData.setTimestamp(discard_time);
                 // TODO RPC, store new session state into remote server
-                RPCSessionWrite(sessionID, sessionData.getVersion(), sessionData.getMessage(), discard_time);
+                RPCSessionWrite(sessionID, good_server_list, sessionData);
                 // discard time = System.currentTimeMillis() + sess_timeout_secs + delta
 
                 // Try primary or backup server in session ID to avoid obsolete copy
@@ -533,9 +536,12 @@ public class Hello_World extends HttpServlet {
 		String call_ID = stringData[0];
 		String operationCode = stringData[1];
 		String sessID = stringData[2] + "_" + stringData[3];
-		session_table.put(sessID, new SessionData(version, message, discard_time));
+		String version = stringData[4];
+		String message = stringData[5];
+		String discard_time = stringData[6];
+		session_table.put(sessID, new SessionData(Integer.parseInt(version), message, Long.parseLong(discard_time)));
 		String reply = call_ID; //just returning callID to indicate the operation succeed
-		return reply.getBytes();;
+		return reply.getBytes();
 	}
 	
 	/**TODO
@@ -613,9 +619,11 @@ public class Hello_World extends HttpServlet {
     }
     
     /** TODO
-	 * RPC to read session data which is not in local session table
+	 * RPC to write session data to destination servers
 	 * 
 	 * @param sessionID
+	 * @param destAddr
+	 * @param new_data
 	 * 
 	 * @return recvStr receive data string
      * @throws IOException 
@@ -629,9 +637,14 @@ public class Hello_World extends HttpServlet {
     	int received_call_ID = -1;
     	int local_call_ID = call_ID;
     	
+    	int version = new_data.getVersion();
+    	String data = new_data.getMessage();
+    	long discard_time = new_data.getTimestamp();
+
     	call_ID++;
-		// message = callID + operation code + sessionID
-    	String message = String.valueOf(local_call_ID) + "_0_" + sessionID; 
+		// message = callID + operation code + sessionID + sessionData
+    	String sessionData_str = String.valueOf(version) + "_" + data + "_" + String.valueOf(discard_time);
+    	String message = String.valueOf(local_call_ID) + "_1_" + sessionID + "_" + sessionData_str; 
     	outBuf = message.getBytes();
     	
     	for (String addr : destAddr) {
