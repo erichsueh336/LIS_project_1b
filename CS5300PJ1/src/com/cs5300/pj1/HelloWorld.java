@@ -56,6 +56,7 @@ public class Hello_World extends HttpServlet {
     private static int call_ID = 0;					    // RPC call ID, increment after each call
     private static boolean connectedToDB = false; 		// Check whether a new booted server has view or not
     private static boolean isLocal = true; 				// True, for local test
+    private static int delta = 60;
     
     /**
      * @throws IOException 
@@ -131,7 +132,7 @@ public class Hello_World extends HttpServlet {
             new_cookie.setMaxAge(sess_timeout_secs); // set timeout to one hour
             response.addCookie(new_cookie); // add cookie to session_table
             String sessionID = cookie_value.split("_")[0] + "_" + cookie_value.split("_")[1];
-            session_table.put(sessionID, new SessionData(0, "Hello new user!!", System.currentTimeMillis()  + sess_timeout_secs));
+            session_table.put(sessionID, new SessionData(0, "Hello, new user!!", System.currentTimeMillis()  + sess_timeout_secs));
             
             cookie_str = session_table.get(sessionID).getMessage();
             cookie_timeout = String.valueOf(session_table.get(sessionID).getTimestamp());
@@ -162,13 +163,14 @@ public class Hello_World extends HttpServlet {
             	}
     			// Received data format = callID + operation + sessionID + sessionData
     			// cookie_value = sessionID(ip+num) + version + primary + backup
-//    			received_call_ID = Integer.parseInt( (return_string.split("_"))[0] );
-//    			received_version_num = Integer.parseInt( (return_string.split("_"))[3] );
+    			// received_call_ID = Integer.parseInt( (return_string.split("_"))[0] );
+    			// received_version_num = Integer.parseInt( (return_string.split("_"))[3] );
                 // If request failed, return an HTML page with a message "session timeout or failed"
             	else {
             		cookie_str = "session timeout or failed";
+            		// Delete cookie for the bad session
+            		session_table.get(sessionID).setTimestamp(0);
             	}
-                // TODO Delete cookie for the bad session
             }
             
             if (sessionData == null) {
