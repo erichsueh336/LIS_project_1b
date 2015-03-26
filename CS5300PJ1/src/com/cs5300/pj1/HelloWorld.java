@@ -7,7 +7,6 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
-//import java.io.PrintWriter;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,10 +20,16 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 // For simpleDB connection
-import com.amazonaws.AmazonClientException;
-import com.amazonaws.AmazonServiceException;
 import com.amazonaws.auth.PropertiesCredentials;
 import com.amazonaws.services.simpledb.*;
+import com.amazonaws.services.simpledb.model.Attribute;
+import com.amazonaws.services.simpledb.model.BatchPutAttributesRequest;
+import com.amazonaws.services.simpledb.model.CreateDomainRequest;
+import com.amazonaws.services.simpledb.model.Item;
+import com.amazonaws.services.simpledb.model.PutAttributesRequest;
+import com.amazonaws.services.simpledb.model.ReplaceableAttribute;
+import com.amazonaws.services.simpledb.model.ReplaceableItem;
+import com.amazonaws.services.simpledb.model.SelectRequest;
 
 // Self-defined class
 import com.cs5300.pj1.SessionData;
@@ -44,6 +49,7 @@ public class HelloWorld extends HttpServlet {
     // Parameters
     private static String local_IP = null;				// Local IP address
     private static String cookie_name = "CS5300PJ1ERIC";// Default cookie name
+    private static String domain_name = "dbView";		// Name of simpleDB's group view
     private static int garbage_collect_period = 600; 	// Time to run garbage collection again
     private static int view_exchange_period = 600; 		// Time to run view exchange thread again
     private static int sess_num = 0;					// Part of session ID
@@ -52,6 +58,7 @@ public class HelloWorld extends HttpServlet {
     private static int RPC_call_ID = 0;					// RPC call ID, increment after each call
     private static boolean connectedToDB = false; 		// Check whether a new booted server has view or not
     private static boolean isLocal = true; 				// True, for local test
+     
     
     /**
      * @throws IOException 
@@ -61,15 +68,13 @@ public class HelloWorld extends HttpServlet {
         super();
         local_IP = getLocalIP(isLocal);
         System.out.println("Local IP = " + local_IP);
-        connectedToDB = getViewFromSimpleDB();
-        startGarbageCollect(garbage_collect_period);
-        startViewExchange(view_exchange_period);
         
         // UDP server initialize
         startUDPServer(UDP_port);
         
-        // Add local server into view
-        group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
+        connectedToDB = getViewFromSimpleDB();
+        startGarbageCollect(garbage_collect_period);
+        startViewExchange(view_exchange_period);
     }
 
     /**
@@ -281,12 +286,73 @@ public class HelloWorld extends HttpServlet {
     // TODO Connect simpleDB to retrieve view
     /**
 	 * Connect to SimpleDB server to get membership view
+     * @throws IOException 
 	 **/
-    public boolean getViewFromSimpleDB() {
-        // Exchange View
-        
-        // return true if retrieve success
-        return true;
+    public boolean getViewFromSimpleDB() throws IOException {
+    	final AmazonSimpleDB sdb = new AmazonSimpleDBClient(new PropertiesCredentials(
+				HelloWorld.class.getResourceAsStream("AwsCredentials.properties")));
+
+		System.out.println("===========================================");
+		System.out.println("Getting Started with Amazon SimpleDB");
+		System.out.println("===========================================\n");
+    	
+		// Get view
+		System.out.println("Checking if the domain " + domain_name + " exists in your account:\n");
+		
+		int isExistViews = 0; // domain
+			
+		for (String domainName : sdb.listDomains().getDomainNames()) {
+			if (domain_name.equals(domainName)) {
+				isExistViews = 1;
+				break;
+			}
+		}
+		if (isExistViews == 0) {
+			System.out.println("domain " + domain_name + " does not exist in simpleDB.\n");
+			// Create domain
+			System.out.println("Creating domain called " + domain_name + ".\n");
+			sdb.createDomain(new CreateDomainRequest(domain_name));
+
+			// Add current server into DB view
+			List<ReplaceableItem> sampleData = new ArrayList<ReplaceableItem>();
+			sampleData.add(new ReplaceableItem().withName("view").withAttributes(
+	                new ReplaceableAttribute().withName("viewString")
+	                .withValue(local_IP + "_UP_" + String.valueOf(System.currentTimeMillis()))));
+			sdb.batchPutAttributes(new BatchPutAttributesRequest(domain_name, sampleData));
+
+			// Add current server into local view
+			group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
+		} else {
+			System.out.println("Domain " + domain_name + " exists in simpleDB.\n");
+			System.out.println("Download view from simpleDB.\n");
+			// Select data from a domain
+			// Notice the use of backticks around the domain name in our select expression.
+			String selectExpression = "select * from `" + domain_name + "`";
+			System.out.println("Selecting: " + selectExpression + "\n");
+			SelectRequest selectRequest = new SelectRequest(selectExpression);
+
+			// download simpleDB data
+			String viewString = null;
+			for (Item item : sdb.select(selectRequest).getItems()) {
+				if (item.getName().equals("view")) {
+					for (Attribute attribute : item.getAttributes()) {
+						viewString = attribute.getValue();
+					}
+				}
+			}
+			
+			// Add current server into local view
+			group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
+			
+			// Format viewString and put view into group_view
+			mergeViewStringToLocalView(viewString);
+			
+			// View retrieval success
+			return true;
+		}
+		
+        // fail to get view
+        return false;
     }
     
     /**
@@ -326,42 +392,80 @@ public class HelloWorld extends HttpServlet {
 	 **/
     public void startViewExchange(int period) {
     	System.out.println("Start View Exchanger");
-    	ScheduledExecutorService viewExchanger = Executors.newSingleThreadScheduledExecutor();
-        viewExchanger.scheduleAtFixedRate(new Runnable() {
-            @Override
+    	
+    	Thread viewExchangeThread = new Thread() {
             public void run() {
-                // TODO
-                // Randomly choose a server
-                // 1. Normal Server
-                // RPC : hisView = exchangeViews(myView)
-                // Merge hisView and MyView
-                // Replace MyView with Merged view
+    	        try {
+    	        	Random random = new Random();
+    	        	while (true) {
+	    	        	List<String> good_server_list = new ArrayList<String>();
+	                	for (Map.Entry<String, ServerStatus> entry : group_view.entrySet()) {
+	                		if (!entry.getKey().equals(local_IP) && entry.getValue().getStatus().equals("UP")) {
+	                			good_server_list.add(entry.getKey());
+	                		}
+	                	}
+	                	good_server_list.add("simpleDB");
+	                	
+	            		int rand = random.nextInt(good_server_list.size());
+	            		String randomBackupServerIP = good_server_list.get(rand);
+	            		good_server_list.remove(rand); // removed server IP that has been chosen
+	            		
+	            		if (randomBackupServerIP.equals("simpleDB")) {
+	                        // Read ViewSDB from SimpleDB.
+	                        // Compute a new merged View, Viewm, from ViewSDB and the current View.
+	                        // Store Viewm back into SimpleDB.
+	                        // Replace the current View with Viewm.
+	            			
+	            			
+	            			final AmazonSimpleDB sdb = new AmazonSimpleDBClient(new PropertiesCredentials(
+	            					HelloWorld.class.getResourceAsStream("AwsCredentials.properties")));
 
-                // 2. SimpleDB
-                // Note
-                // store the View in SimpleDB as a character string, using an encoding
-                // similar to the way metadata is encoded in a session cookie. That way,
-                // an entire View can be read from or written back to SimpleDB using a 
-                // single API call.
-
-                // Read ViewSDB from SimpleDB.
-                // Compute a new merged View, Viewm, from ViewSDB and the current View.
-                // Store Viewm back into SimpleDB.
-                // Replace the current View with Viewm.
-
-                /* avoid convoys
-                Random generator = new Random();
-                    ...
-                  while(true) {
-                    ... gossip with another site chosen at random ...
-                    sleep( (GOSSIP_SECS/2) + generator.nextInt( GOSSIP_SECS ) )
-                  }
-                */
-
-
-                
+	            			System.out.println("===========================================");
+	            			System.out.println("Getting Started with Amazon SimpleDB");
+	            			System.out.println("===========================================\n");
+	            	    	
+	            			// Get view
+	            			System.out.println("Domain " + domain_name + " exists in simpleDB.\n");
+            				System.out.println("Download view from simpleDB.\n");
+            				// Select data from a domain
+            				// Notice the use of backticks around the domain name in our select expression.
+            				String selectExpression = "select * from `" + domain_name + "`";
+            				System.out.println("Selecting: " + selectExpression + "\n");
+            				SelectRequest selectRequest = new SelectRequest(selectExpression);
+            				
+            				// download simpleDB data and add to local view.
+            				String viewString = null;
+            				for (Item item : sdb.select(selectRequest).getItems()) {
+            					if (item.getName().equals("view")) {
+            						for (Attribute attribute : item.getAttributes()) {
+            							viewString = attribute.getValue();
+            						}
+            					}
+            				}
+            				
+            				// Format viewString and put view into group_view
+            				mergeViewStringToLocalView(viewString);
+            				
+            				// Put updated view back to DB
+            				ReplaceableAttribute replaceableAttribute = new ReplaceableAttribute()
+                            	.withName("viewString").withValue(getLocalViewString()).withReplace(true);
+            				
+            				sdb.putAttributes(new PutAttributesRequest()
+                            	.withDomainName(domain_name)
+                            	.withItemName("view")
+                            	.withAttributes(replaceableAttribute));
+	            			
+	            		} else { // normal valid IP address
+	            			mergeViewStringToLocalView(RPCViewExchange(randomBackupServerIP));
+	            		}
+	            		sleep( (view_exchange_period / 2) + random.nextInt(view_exchange_period));
+    	        	}
+    	        } catch (Exception e) {
+    	        	e.printStackTrace();
+    	        }
             }
-        }, 0, period, TimeUnit.SECONDS);
+         };
+         viewExchangeThread.start();
     }
     
     /**
@@ -530,8 +634,13 @@ public class HelloWorld extends HttpServlet {
 	 * @return recvStr receive data string
 	 **/
 	public byte[] serverExchangeView(byte[] pktData, int pktLen) {
-		// Exchange view
-		return null;
+		// Received data format = callID + 3 + viewString
+    	// output data format = callID + viewString
+    	String recv_string = new String(pktData);
+        String[] recv_string_token = recv_string.split("_");
+        mergeViewStringToLocalView(recv_string_token[2]);
+
+		return (recv_string_token[0] + getLocalViewString()).getBytes();
 	}
     
     /**TODO
@@ -651,7 +760,7 @@ public class HelloWorld extends HttpServlet {
 	 * @return recvStr receive data string
      * @throws IOException 
 	 **/
-    public String RPCViewExchange(String sessionID, ArrayList<String> destAddr) throws IOException {
+    public String RPCViewExchange(String ip) throws IOException {
     	DatagramSocket rpcSocket = new DatagramSocket();
     	byte[] outBuf = new byte[1024];
     	byte[] inBuf = new byte[1024];
@@ -660,18 +769,17 @@ public class HelloWorld extends HttpServlet {
     	int local_call_ID = RPC_call_ID;
     	
     	RPC_call_ID++;
-		// message = callID + operation code + cookie value + session data
-    	String message = String.valueOf(local_call_ID) + "_0_" + sessionID; 
+		// message = callID + operation code + local viewString
+    	String message = String.valueOf(local_call_ID) + "_2_" + getLocalViewString(); 
     	outBuf = message.getBytes();
     	
-    	for (String addr : destAddr) {
-    		DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(addr), UDP_port);
-    		rpcSocket.send(sendPkt);
-    	}
+    	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(ip), UDP_port);
+    	rpcSocket.send(sendPkt);
     	
     	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
     	try {
     		do {
+    			// received = callID + viewString
     			recvPkt.setLength(inBuf.length);
     			rpcSocket.receive(recvPkt);
     			return_string = new String(recvPkt.getData());
@@ -680,11 +788,12 @@ public class HelloWorld extends HttpServlet {
     	} catch (SocketTimeoutException stoe) {
     		// timeout
     		recvPkt = null;
+    		return null;
     	} catch(IOException ioe) {
     		// other error
     	}
     	rpcSocket.close();
-    	return return_string;
+    	return (return_string.split("_"))[1];
     }
     
     /**
@@ -731,5 +840,29 @@ public class HelloWorld extends HttpServlet {
     	}
     	
     	return backup_ip;
+    }
+    
+    public void mergeViewStringToLocalView(String viewString) {
+    	String[] tokens = viewString.split("_");
+    	int num_views = tokens.length / 3;
+    	for (int i = 0; i < num_views; i++) {
+    		String ip = tokens[i*3];
+    		String status = tokens[i*3+1];
+    		int timeStamp = Integer.valueOf(tokens[i*3+2]);
+    		if (!group_view.containsKey(ip) || group_view.get(ip).getTimeStamp() < timeStamp) {
+    			// Add non-exist or out of date view
+    			group_view.put(ip, new ServerStatus(status, timeStamp));
+    		}
+    	}
+    }
+    
+    public String getLocalViewString() {
+    	StringBuilder sb = new StringBuilder();
+    	for (Map.Entry<String, ServerStatus> entry : group_view.entrySet()) {
+    		sb.append(entry.getKey() + "_");
+    		sb.append(entry.getValue().getStatus() + "_");
+    		sb.append(entry.getValue().getTimeStamp() + "_");
+    	}
+    	return sb.toString().substring(0, sb.length()-1);
     }
 }
