@@ -7,13 +7,11 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
 //import java.io.PrintWriter;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.sql.Timestamp;
 
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
@@ -22,23 +20,12 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-
-
-
-
-
-
-
-
-
-
-
-
 // For simpleDB connection
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.auth.PropertiesCredentials;
 import com.amazonaws.services.simpledb.*;
+
 // Self-defined class
 import com.cs5300.pj1.SessionData;
 import com.cs5300.pj1.ServerStatus;
@@ -72,11 +59,11 @@ public class HelloWorld extends HttpServlet {
      */
     public HelloWorld() throws IOException {
         super();
+        local_IP = getLocalIP(isLocal);
+        System.out.println("Local IP = " + local_IP);
         connectedToDB = getViewFromSimpleDB();
         startGarbageCollect(garbage_collect_period);
         startViewExchange(view_exchange_period);
-        local_IP = getLocalIP(isLocal);
-        System.out.println("Local IP = " + local_IP);
         
         // UDP server initialize
         startUDPServer(UDP_port);
@@ -89,7 +76,12 @@ public class HelloWorld extends HttpServlet {
      * @see HttpServlet#doGet(HttpServletRequest request, HttpServletResponse response)
      */
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        // initialization
+    	
+    	// Update local server status
+    	group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
+    	
+    	
+    	// initialization
         String cookie_str = "";
         String cookie_timeout = "";
         String test = "";
@@ -99,10 +91,10 @@ public class HelloWorld extends HttpServlet {
         
         if (c == null) {
             // No cookie --> first time user
-        	// SessID = < sess_num, SvrID >
+        	// SessID = < sess_num, SvrIP >
             // Cookie value = < SessID, version, < SvrIDprimary, SvrIDbackup > >
         	String cookie_value = null;
-        	
+        	SessionData first_session_data = new SessionData(0, "Hello new user!!", System.currentTimeMillis()  + sess_timeout_secs);
         	// TODO when deploy to EB, uncomment line below
         	// while (!connectedToDB); // wait until view exchanged
         	
@@ -111,35 +103,34 @@ public class HelloWorld extends HttpServlet {
             	cookie_value = String.valueOf(sess_num) + "_" + local_IP + "_0_" 
                         + local_IP + "_0.0.0.0";
             } else { // View retrieved
-            	// Randomly choose backup server
-            	Random random = new Random();
-            	List<String> good_server_list = new ArrayList<String>();
-            	for (Map.Entry<String, ServerStatus> entry : group_view.entrySet()) {
-            		if (!entry.getKey().equals(local_IP) && entry.getValue().getStatus().equals("UP")) {
-            			good_server_list.add(entry.getKey());
-            		}
-            	}
-            	String randomServerIP = good_server_list.get( random.nextInt(good_server_list.size()) );
-            	            	
-            	// TODO Write to backup server
-            	// RPC: sessionWrite(sessID, version, data, discard_time)
+            	// Randomly choose backup server from group view
+            	String backup_ip = null;
+            	backup_ip = writeDataToBackupServer(first_session_data);
             	
             	// Construct cookie
-            	cookie_value = String.valueOf(sess_num) + "_" + local_IP + "_0_" 
-                        + local_IP + "_" + randomServerIP;
+            	if (backup_ip != null) {
+            		cookie_value = String.valueOf(sess_num) + "_" + local_IP + "_0_" 
+            				+ local_IP + "_" + backup_ip;
+            	} else {
+            		cookie_value = String.valueOf(sess_num) + "_" + local_IP + "_0_" 
+            				+ local_IP + "_0.0.0.0";
+            	}
             }
         	
-        	// store new session data into table         
+        	// store new session data into table
+            session_table.put(String.valueOf(sess_num) + "_" + local_IP, first_session_data);
+            
             test = "first time user, on " + local_IP + ", sess_num = " + String.valueOf(sess_num);
             sess_num++; // increment session number for future session
+            
             Cookie new_cookie = new Cookie(cookie_name, cookie_value); // create cookie
             new_cookie.setMaxAge(sess_timeout_secs); // set timeout to one hour
             response.addCookie(new_cookie); // add cookie to session_table
             
-            session_table.put(cookie_value, new SessionData(0, "Hello new user!!", System.currentTimeMillis()  + sess_timeout_secs));
-            
+            // Display on page
             cookie_str = session_table.get(cookie_value).getMessage();
             cookie_timeout = String.valueOf(session_table.get(cookie_value).getTimestamp());
+            
         } else { // returned user
             
             // action control
@@ -150,31 +141,33 @@ public class HelloWorld extends HttpServlet {
             String primary_server = cookie_value_token[3];
             String backup_server = cookie_value_token[4];
             SessionData sessionData = null;
-            // token format: < sess_num, SvrID, version, SvrIDprimary, SvrIDbackup >
-            if (primary_server.equals(local_IP) || backup_server.equals(local_IP)) {
-                // session data is in local table
+            // token format: < sess_num, SvrIP, version, SvrIPprimary, SvrIPbackup >
+            if ( (primary_server.equals(local_IP) || backup_server.equals(local_IP)) 
+            		&& (version_number == session_table.get(sessionID).getVersion())) {
+            	// local IP address is either primary server or backup server for this session
+            	// and the version number is correct --> session data is in local table
                 sessionData = session_table.get(sessionID);
-                
-                // TODO what if the version in data table is smaller than version from cookie?????
             }
-            else { // session data not exists in local session table
+            else { // session data does not exists in local session table
                 
-                // TODO Perform RPC sessionRead to primary and backup concurrently
-            	RPCSessionRead(sessionID, version_number, primary_server, backup_server);
-            	
-                // TODO If request failed, return an HTML page with a message "session timeout or failed"
-                
-                // TODO Delete cookie for the bad session
+                // Perform RPC sessionRead to primary and backup concurrently
+            	sessionData = RPCSessionRead(sessionID, version_number, primary_server, backup_server);
             }
             
             if (sessionData == null) {
-                test = "Error: cookie exists but sessionData is null!"; // Error occur!
-            
+                
+                // TODO sessionData means RPC request failed
+            	// return an HTML page with a message "session timeout or failed"
+            	test = "Error: session timeout or failed!"; // Error occur!
+                // TODO Delete cookie for the bad session
+            	c.setMaxAge(0); // Terminate the session
+            	response.addCookie(c); // put cookie in response
+            	
             } else { // sessionData exist
                 
                 // Increment version number
             	sessionData.setVersion(sessionData.getVersion() + 1);
-
+            	boolean isLogout = false;
                 if (act == null) {
                     test = "revisit";
                     c.setMaxAge(sess_timeout_secs); // reset cookie timeout to one hour
@@ -205,8 +198,8 @@ public class HelloWorld extends HttpServlet {
                     if (utf8Bytes.length > 512) {
                         test = "String too long";
                     }
-                    else if (!sc.hasNext("[A-Za-z0-9\\.-_]+")) {
-                        test = "Invalid string! only allow [A-Za-z.-_]";
+                    else if (!sc.hasNext("[A-Za-z0-9\\.-]+")) {
+                        test = "Invalid string! only allow [A-Za-z.-]";
                     }
                     else { // error message
                         // is safe characters and length < 512 bytes
@@ -215,41 +208,39 @@ public class HelloWorld extends HttpServlet {
                         sessionData.setMessage(message);
                         sc.close();
                     }
-                    c.setMaxAge(sess_timeout_secs); 		// reset cookie timeout to one hour
+                    c.setMaxAge(sess_timeout_secs); // reset cookie timeout to one hour
                     session_table.put(sessionID, sessionData); // replace old data with same key
                     
                     // Display message
                     cookie_str = sessionData.getMessage();
                     cookie_timeout = String.valueOf(sessionData.getTimestamp());
                 }
-                else if (act.equals("Logout")) {    // Logout button was pressed
-                    test = "Logout";
-                    session_table.remove(sessionID); 	// remove cookie information from table
-                    c.setMaxAge(0); 				// Terminate the session
+                else if (act.equals("Logout")) { // Logout button was pressed
+                	isLogout = true;
+                	test = "Logout";
+                    session_table.remove(sessionID); // remove cookie information from table
+                    c.setMaxAge(0); // Terminate the session
                     
                     // Display message
                     cookie_str = "Goodbye";
                     cookie_timeout = "Expired";
                 }
-                response.addCookie(c); // put cookie in response
                 
-                // TODO RPC, store new session state into remote server
-                // SessionWrite( SessID, new_version, new_data, discard_time )
-                // discard time = System.currentTimeMillis() + sess_timeout_secs + delta
-
-                // Try primary or backup server in session ID to avoid obsolete copy
-                
-                // Response timeout
-                // 1. Choose different server for backup
-                // 2. No backup can be found, abort
-                
-                // ReSponse success
-                // Update view with < SvrID, up, now >
-                // Construct new session cookie
-
-                // Response fail
-                // Update view with < SvrID, down, now >
-                // Create new cookie with backup = NULL
+                if (!isLogout) {
+	                // TODO RPC, store new session state into remote server                
+	                String backup_ip = null;
+	            	backup_ip = writeDataToBackupServer(sessionData);
+	            	
+	            	// Construct cookie
+	            	if (backup_ip != null) { // Response success
+	            		c.setValue(String.valueOf(sess_num) + "_" + local_IP + "_" + sessionData.getVersion()
+	            				+ "_" + local_IP + "_" + backup_ip);
+	            	} else { // Response fail
+	            		c.setValue(String.valueOf(sess_num) + "_" + local_IP + "_" + sessionData.getVersion()
+	            				+ "_" + local_IP + "_0.0.0.0");
+	            	}
+	            	response.addCookie(c); // put cookie in response
+                }
             }
         }
         
@@ -466,7 +457,6 @@ public class HelloWorld extends HttpServlet {
         		        
         		        switch (operationCode) {
         					case 0: // sessionRead
-        						// accepts call arguments and returns call results
         						outBuf = serverSessionRead(recvPkt.getData(), recvPkt.getLength());
         						break;
         					
@@ -503,8 +493,13 @@ public class HelloWorld extends HttpServlet {
 	 * @return recvStr receive data string
 	 **/
     public byte[] serverSessionRead(byte[] pktData, int pktLen) {
-		
-		return null;
+    	// Received data format = callID + operation + sessionID(num+ip)
+    	// output data format = callID + sessionData(ver#_message_timestamp)
+    	String recv_string = new String(pktData);
+        String[] recv_string_token = recv_string.split("_");
+        String return_string =  recv_string_token[0] + "_"
+        		+ session_table.get(recv_string_token[2] + "_" + recv_string_token[3]).toString();
+		return return_string.getBytes();
 	}
     
     /**TODO
@@ -516,8 +511,14 @@ public class HelloWorld extends HttpServlet {
 	 * @return recvStr receive data string
 	 **/
 	public byte[] serverSessionWrite(byte[] pktData, int pktLen) {
-		
-		return null;
+		// Received data format = callID + operation code + sessionID(2) + session data(3)
+    	// output data format = callID
+    	String recv_string = new String(pktData);
+        String[] recv_string_token = recv_string.split("_");
+        String sessionID =  recv_string_token[2] + "_" + recv_string_token[3];
+        session_table.put(sessionID, new SessionData(Integer.valueOf(recv_string_token[4]), 
+        		recv_string_token[5], Integer.valueOf(recv_string_token[6])));
+		return recv_string_token[0].getBytes();
 	}
 	
 	/**TODO
@@ -544,20 +545,21 @@ public class HelloWorld extends HttpServlet {
 	 * @return recvStr receive data string
      * @throws IOException 
 	 **/
-    public String RPCSessionRead(String sessionID, int version_num, String primary_IP, String backup_IP) throws IOException {
+    public SessionData RPCSessionRead(String sessionID, int version_num, String primary_IP, String backup_IP) throws IOException {
     	DatagramSocket rpcSocket = new DatagramSocket();
     	byte[] outBuf = new byte[1024];
     	byte[] inBuf = new byte[1024];
     	
-    	String return_string = null;
+    	
     	int received_version_num = -1;
     	int received_call_ID = -1;
     	int local_call_ID = RPC_call_ID;
+    	SessionData return_data = null;
     	
     	// Increment call ID for next RPC
     	RPC_call_ID++;
     	
-    	// message = callID + operation code + arguments
+    	// message = callID + operation code + sessionID
     	String message = String.valueOf(local_call_ID) + "_0_" + sessionID; 
     	outBuf = message.getBytes();
     	
@@ -574,23 +576,28 @@ public class HelloWorld extends HttpServlet {
     		do {
     			recvPkt.setLength(inBuf.length);
     			rpcSocket.receive(recvPkt);
-    			return_string = new String(recvPkt.getData());
+    			String received_string = new String(recvPkt.getData());
+    			String[] received_string_token = received_string.split("_");
     			
-    			// Received data format = operation + cookie value + sessionData
-    			// cookie value = sessionID(ip+num) + version + primary + backup
-    			received_call_ID = Integer.parseInt( (return_string.split("_"))[0] );
-    			received_version_num = Integer.parseInt( (return_string.split("_"))[3] );
+    			
+    			// Received data format = callID + sessionData(ver#_message_timestamp)
+    			received_call_ID = Integer.parseInt( received_string_token[0] );
+    			received_version_num = Integer.parseInt( received_string_token[1] );
+    			return_data = new SessionData(received_version_num, 
+    										received_string_token[2], 
+    										Integer.parseInt( received_string_token[3]) );
     			
     		} while (received_call_ID != local_call_ID && version_num != received_version_num);
     	} catch (SocketTimeoutException stoe) {
     		// RPC timeout, return null string
-    		return_string = null;
+    		System.out.println("RPC session read timeout");
     		recvPkt = null;
     	} catch(IOException ioe) {
     		// other error
     	}
+    	
     	rpcSocket.close();
-    	return return_string;
+    	return return_data;
     }
     
     /**TODO
@@ -601,7 +608,7 @@ public class HelloWorld extends HttpServlet {
 	 * @return recvStr receive data string
      * @throws IOException 
 	 **/
-    public String RPCSessionWrite(String sessionID, ArrayList<String> destAddr) throws IOException {
+    public boolean RPCSessionWrite(String sessionID, String ip, SessionData data) throws IOException {
     	DatagramSocket rpcSocket = new DatagramSocket();
     	byte[] outBuf = new byte[1024];
     	byte[] inBuf = new byte[1024];
@@ -610,14 +617,12 @@ public class HelloWorld extends HttpServlet {
     	int local_call_ID = RPC_call_ID;
     	
     	RPC_call_ID++;
-		// message = callID + operation code + cookie value + session data
-    	String message = String.valueOf(local_call_ID) + "_0_" + sessionID; 
+		// message = callID + operation code + sessionID + session data
+    	String message = String.valueOf(local_call_ID) + "_1_" + sessionID + "_" + data.toString();
     	outBuf = message.getBytes();
     	
-    	for (String addr : destAddr) {
-    		DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(addr), UDP_port);
-    		rpcSocket.send(sendPkt);
-    	}
+    	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(ip), UDP_port);
+    	rpcSocket.send(sendPkt);
     	
     	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
     	try {
@@ -630,14 +635,15 @@ public class HelloWorld extends HttpServlet {
     	} catch (SocketTimeoutException stoe) {
     		// timeout
     		recvPkt = null;
+    		return false;
     	} catch(IOException ioe) {
     		// other error
     	}
     	rpcSocket.close();
-    	return return_string;
+    	return true;
     }
     
-    /**TODO
+    /**
 	 * RPC to exchange view with target server or simpleDB
 	 * 
 	 * @param sessionID
@@ -680,5 +686,50 @@ public class HelloWorld extends HttpServlet {
     	rpcSocket.close();
     	return return_string;
     }
-
+    
+    /**
+	 * RPC to exchange view with target server or simpleDB
+	 * 
+	 * @param data session data to write to remote server
+	 * 
+	 * @return backup_ip null, if no server can be written to
+     * @throws IOException 
+	 **/
+    public String writeDataToBackupServer(SessionData data) throws IOException {
+    	// Choose available backup server from group view
+    	List<String> good_server_list = new ArrayList<String>();
+    	for (Map.Entry<String, ServerStatus> entry : group_view.entrySet()) {
+    		if (!entry.getKey().equals(local_IP) && entry.getValue().getStatus().equals("UP")) {
+    			good_server_list.add(entry.getKey());
+    		}
+    	}
+    	
+    	boolean backup_written = false; // True, if data is wrote to other server by RPC
+    	String backup_ip = null;
+    	
+    	while (backup_written) { // Keep trying if data is not written
+    		if (good_server_list.isEmpty()) break; // No available server
+    		Random random = new Random();
+    		int rand = random.nextInt(good_server_list.size());
+    		String randomBackupServerIP = good_server_list.get(rand);
+    		good_server_list.remove(rand); // removed server IP that has been chosen
+    	            	
+    		// Write to backup server
+    		String session_ID = String.valueOf(sess_num) + "_" + local_IP;
+    		
+    		if ( RPCSessionWrite(session_ID, randomBackupServerIP, data) ) {
+    			backup_written = true;
+    			backup_ip = randomBackupServerIP;
+    			
+    			// Update good server status
+    			group_view.put(backup_ip, new ServerStatus("UP", System.currentTimeMillis()));
+    			break;
+    		};
+    		
+    		// Update failed server status
+    		group_view.put(randomBackupServerIP, new ServerStatus("DOWN", System.currentTimeMillis()));
+    	}
+    	
+    	return backup_ip;
+    }
 }
