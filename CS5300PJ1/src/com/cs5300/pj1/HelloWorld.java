@@ -38,7 +38,7 @@ import com.cs5300.pj1.ServerStatus;
  * Servlet implementation class HelloWorld
  */
 @WebServlet("/HelloWorld")
-public class HelloWorld extends HttpServlet {
+public class Hello_World extends HttpServlet {
     private static final long serialVersionUID = 1L;
     
     // Local Data Table
@@ -61,7 +61,7 @@ public class HelloWorld extends HttpServlet {
      * @throws IOException 
      * @see HttpServlet#HttpServlet()
      */
-    public HelloWorld() throws IOException {
+    public Hello_World() throws IOException {
         super();
         connectedToDB = getViewFromSimpleDB();
         startGarbageCollect(garbage_collect_period);
@@ -115,8 +115,8 @@ public class HelloWorld extends HttpServlet {
             	
             	// Write to backup server
 //            	RPC: sessionWrite(sessID, version, data, discard_time)
-            	
-            	RPCSessionWrite(sessID, 0, data, discard_time);
+            	SessionData new_data = new SessionData()
+            	RPCSessionWrite(sessID, randomServerIP, new_data);
             	// Construct cookie
             	cookie_value = String.valueOf(sess_num) + "_" + local_IP + "_0_" 
                         + local_IP + "_" + randomServerIP;
@@ -153,9 +153,10 @@ public class HelloWorld extends HttpServlet {
             else { // session data not exists in local session table
                 // Perform RPC sessionRead to primary and backup concurrently
             	String recv_string = RPCSessionRead(sessionID, version_number, primary_server, backup_server);
+            	// callid_operation_version_message_time
             	if (recv_string != null) {	            	
 	            	String[] splits = recv_string.split("_");
-	            	SessionData sessionData = new SessionData(splits[3], message, timestamp);
+	            	sessionData = new SessionData(Integer.parseInt(splits[2]), splits[3], Long.parseLong(splits[4]));
             	}
     			// Received data format = callID + operation + sessionID + sessionData
     			// cookie_value = sessionID(ip+num) + version + primary + backup
@@ -532,7 +533,6 @@ public class HelloWorld extends HttpServlet {
 		String call_ID = stringData[0];
 		String operationCode = stringData[1];
 		String sessID = stringData[2] + "_" + stringData[3];
-		session_table = new HashMap<String, SessionData>();
 		session_table.put(sessID, new SessionData(version, message, discard_time));
 		String reply = call_ID; //just returning callID to indicate the operation succeed
 		return reply.getBytes();;
@@ -551,7 +551,7 @@ public class HelloWorld extends HttpServlet {
 		return null;
 	}
     
-    /** TODO
+    /** 
 	 * RPC to read session data which is not in local session table
 	 * 
 	 * @param sessionID
@@ -608,10 +608,11 @@ public class HelloWorld extends HttpServlet {
     		// other error
     	}
     	rpcSocket.close();
+    	// return_string : callid_operation_version_message_time
     	return return_string;
     }
     
-    /**
+    /** TODO
 	 * RPC to read session data which is not in local session table
 	 * 
 	 * @param sessionID
@@ -619,7 +620,8 @@ public class HelloWorld extends HttpServlet {
 	 * @return recvStr receive data string
      * @throws IOException 
 	 **/
-    public String RPCSessionWrite(String sessionID, ArrayList<String> destAddr) throws IOException {
+    //  sessionWrite(sessID, version, data, discard_time)
+    public String RPCSessionWrite(String sessionID, ArrayList<String> destAddr, SessionData new_data) throws IOException {
     	DatagramSocket rpcSocket = new DatagramSocket();
     	byte[] outBuf = new byte[1024];
     	byte[] inBuf = new byte[1024];
