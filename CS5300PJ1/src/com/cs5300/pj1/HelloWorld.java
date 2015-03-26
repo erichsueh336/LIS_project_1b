@@ -38,7 +38,7 @@ import com.cs5300.pj1.ServerStatus;
  * Servlet implementation class HelloWorld
  */
 @WebServlet("/HelloWorld")
-public class Hello_World extends HttpServlet {
+public class HelloWorld extends HttpServlet {
     private static final long serialVersionUID = 1L;
     
     // Local Data Table
@@ -62,7 +62,7 @@ public class Hello_World extends HttpServlet {
      * @throws IOException 
      * @see HttpServlet#HttpServlet()
      */
-    public Hello_World() throws IOException {
+    public HelloWorld() throws IOException {
         super();
         connectedToDB = getViewFromSimpleDB();
         startGarbageCollect(garbage_collect_period);
@@ -244,7 +244,11 @@ public class Hello_World extends HttpServlet {
                 long discard_time = System.currentTimeMillis() + sess_timeout_secs + delta;
                 sessionData.setTimestamp(discard_time);
                 // TODO RPC, store new session state into remote server
-                RPCSessionWrite(sessionID, good_server_list, sessionData);
+                
+                ArrayList<String> iplist = new ArrayList<String>();
+            	iplist.add(primary_server);
+            	iplist.add(backup_server);
+                RPCSessionWrite(sessionID, iplist, sessionData);
                 // discard time = System.currentTimeMillis() + sess_timeout_secs + delta
 
                 // Try primary or backup server in session ID to avoid obsolete copy
