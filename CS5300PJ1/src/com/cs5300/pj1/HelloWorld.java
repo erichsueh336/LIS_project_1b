@@ -21,6 +21,9 @@ import javax.servlet.http.HttpServletResponse;
 
 
 
+
+
+
 // For simpleDB connection
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.BasicAWSCredentials;
@@ -29,6 +32,7 @@ import com.amazonaws.services.simpledb.AmazonSimpleDBClient;
 import com.amazonaws.services.simpledb.model.Attribute;
 import com.amazonaws.services.simpledb.model.BatchPutAttributesRequest;
 import com.amazonaws.services.simpledb.model.CreateDomainRequest;
+import com.amazonaws.services.simpledb.model.DeleteDomainRequest;
 import com.amazonaws.services.simpledb.model.Item;
 import com.amazonaws.services.simpledb.model.PutAttributesRequest;
 import com.amazonaws.services.simpledb.model.ReplaceableAttribute;
@@ -54,7 +58,7 @@ public class HelloWorld extends HttpServlet {
     private static String local_IP = null;				// Local IP address
     private static String cookie_name = "CS5300PJ1ERIC";// Default cookie name
     private static String domain_name = "dbView";		// Name of simpleDB's group view
-    private static int garbage_collect_period = 8; 	// Time to run garbage collection again
+    private static int garbage_collect_period = 60; 	// Time to run garbage collection again
     private static int view_exchange_period = 5000; 		// Time to run view exchange thread again
     private static int sess_num = 0;					// Part of session ID
     private static int sess_timeout_secs = 1800000; 	// Default session timeout duration
@@ -79,10 +83,10 @@ public class HelloWorld extends HttpServlet {
         startUDPServer(UDP_port);
         
         connectedToDB = getViewFromSimpleDB();
-        startGarbageCollect(garbage_collect_period);
+        //startGarbageCollect(garbage_collect_period);
         startViewExchange(view_exchange_period);
     }
-
+    
     /**
      * @see HttpServlet#doGet(HttpServletRequest request, HttpServletResponse response)
      */
@@ -170,7 +174,7 @@ public class HelloWorld extends HttpServlet {
             SessionData sessionData = null;
             
             // TEST
-            System.out.println("sessionID = " + sessionID);
+            System.out.println("/nsessionID = " + sessionID);
             System.out.println("primary_server = " + primary_server);
             System.out.println("backup_server = " + backup_server + "\n");
             
@@ -335,13 +339,21 @@ public class HelloWorld extends HttpServlet {
 		System.out.println("Checking if the domain " + domain_name + " exists in your account:\n");
 		
 		int isExistViews = 0; // domain
-
+		
+		// TESTING START
+		System.out.println("Delete " + domain_name + " domain for test.\n");
+		sdb.deleteDomain(new DeleteDomainRequest(domain_name));
+		// TESTING END
+		
 		for (String domainName : sdb.listDomains().getDomainNames()) {
 			if (domain_name.equals(domainName)) {
 				isExistViews = 1;
 				break;
 			}
 		}
+		
+		
+		
 		if (isExistViews == 0) {
 			System.out.println("domain " + domain_name + " does not exist in simpleDB.\n");
 			// Create domain
@@ -359,15 +371,7 @@ public class HelloWorld extends HttpServlet {
 		} else {
             
 			System.out.println("Domain " + domain_name + " exists in simpleDB.\n");
-			
-			/*
-			// TESTING START
-			System.out.println("Recreate " + domain_name + " domain for test.\n");
-			sdb.deleteDomain(new DeleteDomainRequest(domain_name));
-			sdb.createDomain(new CreateDomainRequest(domain_name));
-			// TESTING END
-			 */
-			
+
 			System.out.println("Download view from simpleDB.\n");
 			// Select data from a domain
 			// Notice the use of backticks around the domain name in our select expression.
@@ -403,28 +407,37 @@ public class HelloWorld extends HttpServlet {
 	 **/
     public void startGarbageCollect(int period) {
     	System.out.println("Start Garbage Collector");
-    	ScheduledExecutorService garbageCollector = Executors.newSingleThreadScheduledExecutor();
-        garbageCollector.scheduleAtFixedRate(new Runnable() {
-            @Override
+    	
+    	
+    	Thread viewExchangeThread = new Thread() {
+
             public void run() {
-                // Iterate through session table
-            	System.out.println("=== Garbage Collect Start ===");
-            	Iterator<Map.Entry<String, SessionData>> it = session_table.entrySet().iterator();
-            	long currentTime = System.currentTimeMillis();
-            	while (it.hasNext()) {
-                    Map.Entry<String, SessionData> sessData = it.next();
-                    
-                    // collect data which has discard time < now
-                    if (sessData.getValue().getTimestamp() < currentTime) {
-                    	it.remove();
-                    	System.out.println(sessData.getKey() + " = " + sessData.getValue());
-                    }
-                    
-                    it.remove(); // avoids a ConcurrentModificationException
-                }
-                
+            	while (true) {
+            		try {
+		                // Iterate through session table
+		            	System.out.println("=== Garbage Collect Start ===");
+		            	Iterator<Map.Entry<String, SessionData>> it = session_table.entrySet().iterator();
+		            	long currentTime = System.currentTimeMillis();
+		            	while (it.hasNext()) {
+		                    Map.Entry<String, SessionData> sessData = it.next();
+		                    
+		                    // collect data which has discard time < now
+		                    if (sessData.getValue().getTimestamp() < currentTime) {
+		                    	it.remove();
+		                    	System.out.println(sessData.getKey() + " = " + sessData.getValue());
+		                    }
+		                    
+		                    it.remove(); // avoids a ConcurrentModificationException
+		                }
+						sleep(10000);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+            	}
             }
-        }, 0, period, TimeUnit.SECONDS);
+    	};
+    	viewExchangeThread.start();
     }
     
     /**
@@ -453,7 +466,7 @@ public class HelloWorld extends HttpServlet {
 	            		good_server_list.remove(rand); // removed server IP that has been chosen
 	            		
 	            		// NOTE!!!! remove this line to test server to server view exchange
-	            		randomBackupServerIP = "simpleDB";
+	            		//randomBackupServerIP = "simpleDB";
 	            		
 	            		
 	            		if (randomBackupServerIP.equals("simpleDB")) {
@@ -503,6 +516,7 @@ public class HelloWorld extends HttpServlet {
                             	.withAttributes(replaceableAttribute));
 	            			
 	            		} else { // normal valid IP address
+	            			System.out.println("exchange with other view");
 	            			mergeViewStringToLocalView(RPCViewExchange(randomBackupServerIP));
 	            		}
 	            		sleep( (view_exchange_period / 2) + random.nextInt(view_exchange_period));
@@ -531,12 +545,20 @@ public class HelloWorld extends HttpServlet {
                     // filters out 127.0.0.1 and inactive interfaces
                     if (iface.isLoopback() || !iface.isUp())
                         continue;
-    
+                    
                     Enumeration<InetAddress> addresses = iface.getInetAddresses();
+                    /*
                     InetAddress addr = addresses.nextElement(); // Get first element (mac address)
                     addr = addresses.nextElement(); // Get second element (ip address)
                     return addr.getHostAddress();
-                    
+                    */
+                    while(addresses.hasMoreElements()) {
+                        InetAddress addr = addresses.nextElement();
+                        if (iface.getDisplayName().equals("en0") && addr.getHostAddress().length() < 16) {
+                        	System.out.println(iface.getDisplayName() + " " + addr.getHostAddress());
+                        	return addr.getHostAddress();
+                        }
+                    }
                     /*
                     while(addresses.hasMoreElements()) {
                         InetAddress addr = addresses.nextElement();
@@ -722,6 +744,7 @@ public class HelloWorld extends HttpServlet {
     	// Send to primary server
     	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(primary_IP), UDP_port);
     	rpcSocket.send(sendPkt);
+    	rpcSocket.setSoTimeout(5000);
     	
     	// Send to backup server
     	if (backup_IP != "0.0.0.0") {
@@ -748,7 +771,8 @@ public class HelloWorld extends HttpServlet {
     		} while (received_call_ID != local_call_ID && version_num != received_version_num);
     	} catch (SocketTimeoutException stoe) {
     		// RPC timeout, return null string
-    		System.out.println("RPC session read timeout");
+    		System.out.println("--- RPCSessionRead timeout return null ---");
+    		group_view.put(backup_IP, new ServerStatus("DOWN", System.currentTimeMillis()));
     		recvPkt = null;
     	} catch(IOException ioe) {
     		// other error
@@ -781,7 +805,7 @@ public class HelloWorld extends HttpServlet {
     	
     	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(ip), UDP_port);
     	rpcSocket.send(sendPkt);
-    	
+    	rpcSocket.setSoTimeout(5000);
     	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
     	try {
     		do {
@@ -792,6 +816,8 @@ public class HelloWorld extends HttpServlet {
     		} while (received_call_ID != local_call_ID);
     	} catch (SocketTimeoutException stoe) {
     		// timeout
+    		System.out.println("--- RPCSessionWrite timeout return null ---");
+    		group_view.put(ip, new ServerStatus("DOWN", System.currentTimeMillis()));
     		recvPkt = null;
     		return false;
     	} catch(IOException ioe) {
@@ -810,6 +836,7 @@ public class HelloWorld extends HttpServlet {
      * @throws IOException 
 	 **/
     public String RPCViewExchange(String ip) throws IOException {
+    	System.out.println("--- RPCViewExchange called ---");
     	DatagramSocket rpcSocket = new DatagramSocket();
     	byte[] outBuf = new byte[1024];
     	byte[] inBuf = new byte[1024];
@@ -824,7 +851,7 @@ public class HelloWorld extends HttpServlet {
     	
     	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(ip), UDP_port);
     	rpcSocket.send(sendPkt);
-    	
+    	rpcSocket.setSoTimeout(5000);
     	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
     	try {
     		do {
@@ -836,12 +863,18 @@ public class HelloWorld extends HttpServlet {
     		} while (received_call_ID != local_call_ID);
     	} catch (SocketTimeoutException stoe) {
     		// timeout
+    		System.out.println("--- RPCViewExchange timeout return null ---");
+    		System.out.println("     ip = " + ip);
+    		group_view.put(ip, new ServerStatus("DOWN", System.currentTimeMillis()));
     		recvPkt = null;
     		return null;
     	} catch(IOException ioe) {
     		// other error
     	}
     	rpcSocket.close();
+    	System.out.println("--- RPCViewExchange success ---");
+    	System.out.println((return_string.split("_"))[1]);
+    	
     	return (return_string.split("_"))[1];
     }
     
