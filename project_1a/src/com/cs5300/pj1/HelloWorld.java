@@ -21,18 +21,18 @@ import javax.servlet.http.HttpServletResponse;
 
 
 
-
-
-
 // For simpleDB connection
+import com.amazonaws.AmazonClientException;
+import com.amazonaws.AmazonServiceException;
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.auth.PropertiesCredentials;
 import com.amazonaws.services.simpledb.AmazonSimpleDB;
 import com.amazonaws.services.simpledb.AmazonSimpleDBClient;
 import com.amazonaws.services.simpledb.model.Attribute;
 import com.amazonaws.services.simpledb.model.BatchPutAttributesRequest;
 import com.amazonaws.services.simpledb.model.CreateDomainRequest;
-import com.amazonaws.services.simpledb.model.DeleteDomainRequest;
+import com.amazonaws.services.simpledb.model.DeleteAttributesRequest;
 import com.amazonaws.services.simpledb.model.Item;
 import com.amazonaws.services.simpledb.model.PutAttributesRequest;
 import com.amazonaws.services.simpledb.model.ReplaceableAttribute;
@@ -58,11 +58,11 @@ public class HelloWorld extends HttpServlet {
     private static String local_IP = null;				// Local IP address
     private static String cookie_name = "CS5300PJ1ERIC";// Default cookie name
     private static String domain_name = "dbView";		// Name of simpleDB's group view
-    private static int garbage_collect_period = 60; 	// Time to run garbage collection again
-    private static int view_exchange_period = 5000; 		// Time to run view exchange thread again
+    private static int garbage_collect_period = 600; 	// Time to run garbage collection again
+    private static int view_exchange_period = 600; 		// Time to run view exchange thread again
     private static int sess_num = 0;					// Part of session ID
     private static int sess_timeout_secs = 1800000; 	// Default session timeout duration
-    private static int UDP_port = 8882;					// Default UDP port
+    private static int UDP_port = 8888;					// Default UDP port
     private static int RPC_call_ID = 0;					// RPC call ID, increment after each call
     private static boolean connectedToDB = false; 		// Check whether a new booted server has view or not
     private static boolean isLocal = true; 				// True, for local test
@@ -76,22 +76,20 @@ public class HelloWorld extends HttpServlet {
         super();
         local_IP = getLocalIP(isLocal);
         System.out.println("Local IP = " + local_IP);
-        // Add current server into local view
-     	group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
         
-     	// UDP server initialize
+        // UDP server initialize
         startUDPServer(UDP_port);
         
         connectedToDB = getViewFromSimpleDB();
-        //startGarbageCollect(garbage_collect_period);
+        startGarbageCollect(garbage_collect_period);
         startViewExchange(view_exchange_period);
     }
-    
+
     /**
      * @see HttpServlet#doGet(HttpServletRequest request, HttpServletResponse response)
      */
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-    	System.out.println("doGet START");
+    	
     	// Update local server status
     	group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
     	
@@ -105,7 +103,6 @@ public class HelloWorld extends HttpServlet {
         Cookie c = getCookie(request, cookie_name);
         
         if (c == null) {
-        	System.out.println("First time user");
             // No cookie --> first time user
         	// SessID = < sess_num, SvrIP >
             // Cookie value = < SessID, version, < SvrIDprimary, SvrIDbackup > >
@@ -143,27 +140,12 @@ public class HelloWorld extends HttpServlet {
             new_cookie.setMaxAge(sess_timeout_secs); // set timeout to one hour
             response.addCookie(new_cookie); // add cookie to session_table
             
-            // TEST
-            String[] cookie_value_token = cookie_value.split("_");
-            String sessionID = cookie_value_token[0] + "_" + cookie_value_token[1];
-            
-            
             // Display on page
-            cookie_str = session_table.get(sessionID).getMessage();
-            cookie_timeout = String.valueOf(session_table.get(sessionID).getTimestamp());
+            cookie_str = session_table.get(cookie_value).getMessage();
+            cookie_timeout = String.valueOf(session_table.get(cookie_value).getTimestamp());
             
         } else { // returned user
             
-        	System.out.println("=== Returned user ===");
-        	System.out.println("current view");
-        	for (Map.Entry<String, SessionData> entry : session_table.entrySet()) {
-        		System.out.println("    sessID = " + entry.getKey());
-        		System.out.println("    version = " + entry.getValue().getVersion());
-        		System.out.println("    message = " + entry.getValue().getMessage());
-        		System.out.println("    timestamp = " + entry.getValue().getTimestamp() + "\n");
-        	}
-        	
-        	
             // action control
             String act = request.getParameter("act");
             String[] cookie_value_token = c.getValue().split("_");
@@ -172,22 +154,15 @@ public class HelloWorld extends HttpServlet {
             String primary_server = cookie_value_token[3];
             String backup_server = cookie_value_token[4];
             SessionData sessionData = null;
-            
-            // TEST
-            System.out.println("/nsessionID = " + sessionID);
-            System.out.println("primary_server = " + primary_server);
-            System.out.println("backup_server = " + backup_server + "\n");
-            
             // token format: < sess_num, SvrIP, version, SvrIPprimary, SvrIPbackup >
             if ( (primary_server.equals(local_IP) || backup_server.equals(local_IP)) 
-            		&& session_table.containsKey(sessionID) 
             		&& (version_number == session_table.get(sessionID).getVersion())) {
             	// local IP address is either primary server or backup server for this session
             	// and the version number is correct --> session data is in local table
                 sessionData = session_table.get(sessionID);
             }
             else { // session data does not exists in local session table
-            	System.out.println("session data does not exists");
+                
                 // Perform RPC sessionRead to primary and backup concurrently
             	sessionData = RPCSessionRead(sessionID, version_number, primary_server, backup_server);
             }
@@ -247,7 +222,6 @@ public class HelloWorld extends HttpServlet {
                         sc.close();
                     }
                     c.setMaxAge(sess_timeout_secs); // reset cookie timeout to one hour
-                    System.out.println("Replace: sessID = " + sessionID);
                     session_table.put(sessionID, sessionData); // replace old data with same key
                     
                     // Display message
@@ -263,24 +237,20 @@ public class HelloWorld extends HttpServlet {
                     // Display message
                     cookie_str = "Goodbye";
                     cookie_timeout = "Expired";
-                    response.addCookie(c);
                 }
                 
                 if (!isLogout) {
-                	System.out.println("not log out");
 	                // TODO RPC, store new session state into remote server                
 	                String backup_ip = null;
 	            	backup_ip = writeDataToBackupServer(sessionData);
 	            	
 	            	// Construct cookie
 	            	if (backup_ip != null) { // Response success
-	            		c.setValue(sessionID + "_" + sessionData.getVersion()
+	            		c.setValue(String.valueOf(sess_num) + "_" + local_IP + "_" + sessionData.getVersion()
 	            				+ "_" + local_IP + "_" + backup_ip);
-	            		System.out.println("new cookie = " + c.getValue());
 	            	} else { // Response fail
-	            		c.setValue(sessionID + "_" + sessionData.getVersion()
+	            		c.setValue(String.valueOf(sess_num) + "_" + local_IP + "_" + sessionData.getVersion()
 	            				+ "_" + local_IP + "_0.0.0.0");
-	            		System.out.println("new cookie = " + c.getValue());
 	            	}
 	            	response.addCookie(c); // put cookie in response
                 }
@@ -327,33 +297,27 @@ public class HelloWorld extends HttpServlet {
      * @throws IOException 
 	 **/
     public boolean getViewFromSimpleDB() throws IOException {
-    	AWSCredentials credentials=new BasicAWSCredentials(
-    			"AKIAJW6MMYVAEV3VWVIQ", "1JgVDeFfZO5dKcVlo4lY3Fbby1bAbq1lOZ759Eqc");
+    	
+    	
+    	AWSCredentials credentials=new BasicAWSCredentials("1JgVDeFfZO5dKcVlo4lY3Fbby1bAbq1lOZ759Eqc",
+    			"AKIAJW6MMYVAEV3VWVIQ");
     	final AmazonSimpleDB sdb = new AmazonSimpleDBClient(credentials);
 
 		System.out.println("===========================================");
-		System.out.println("Getting view from Amazon SimpleDB");
+		System.out.println("Getting Started with Amazon SimpleDB");
 		System.out.println("===========================================\n");
     	
 		// Get view
 		System.out.println("Checking if the domain " + domain_name + " exists in your account:\n");
 		
 		int isExistViews = 0; // domain
-		
-		// TESTING START
-		System.out.println("Delete " + domain_name + " domain for test.\n");
-		sdb.deleteDomain(new DeleteDomainRequest(domain_name));
-		// TESTING END
-		
+			
 		for (String domainName : sdb.listDomains().getDomainNames()) {
 			if (domain_name.equals(domainName)) {
 				isExistViews = 1;
 				break;
 			}
 		}
-		
-		
-		
 		if (isExistViews == 0) {
 			System.out.println("domain " + domain_name + " does not exist in simpleDB.\n");
 			// Create domain
@@ -367,11 +331,10 @@ public class HelloWorld extends HttpServlet {
 	                .withValue(local_IP + "_UP_" + String.valueOf(System.currentTimeMillis()))));
 			sdb.batchPutAttributes(new BatchPutAttributesRequest(domain_name, sampleData));
 
-			
+			// Add current server into local view
+			group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
 		} else {
-            
 			System.out.println("Domain " + domain_name + " exists in simpleDB.\n");
-
 			System.out.println("Download view from simpleDB.\n");
 			// Select data from a domain
 			// Notice the use of backticks around the domain name in our select expression.
@@ -388,6 +351,9 @@ public class HelloWorld extends HttpServlet {
 					}
 				}
 			}
+			
+			// Add current server into local view
+			group_view.put(local_IP, new ServerStatus("UP", System.currentTimeMillis()) );
 			
 			// Format viewString and put view into group_view
 			mergeViewStringToLocalView(viewString);
@@ -407,37 +373,27 @@ public class HelloWorld extends HttpServlet {
 	 **/
     public void startGarbageCollect(int period) {
     	System.out.println("Start Garbage Collector");
-    	
-    	
-    	Thread viewExchangeThread = new Thread() {
-
+    	ScheduledExecutorService garbageCollector = Executors.newSingleThreadScheduledExecutor();
+        garbageCollector.scheduleAtFixedRate(new Runnable() {
+            @Override
             public void run() {
-            	while (true) {
-            		try {
-		                // Iterate through session table
-		            	System.out.println("=== Garbage Collect Start ===");
-		            	Iterator<Map.Entry<String, SessionData>> it = session_table.entrySet().iterator();
-		            	long currentTime = System.currentTimeMillis();
-		            	while (it.hasNext()) {
-		                    Map.Entry<String, SessionData> sessData = it.next();
-		                    
-		                    // collect data which has discard time < now
-		                    if (sessData.getValue().getTimestamp() < currentTime) {
-		                    	it.remove();
-		                    	System.out.println(sessData.getKey() + " = " + sessData.getValue());
-		                    }
-		                    
-		                    it.remove(); // avoids a ConcurrentModificationException
-		                }
-						sleep(10000);
-					} catch (InterruptedException e) {
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-					}
-            	}
+                // Iterate through session table
+            	Iterator<Map.Entry<String, SessionData>> it = session_table.entrySet().iterator();
+            	long currentTime = System.currentTimeMillis();
+            	while (it.hasNext()) {
+                    Map.Entry<String, SessionData> sessData = it.next();
+                    
+                    // collect data which has discard time < now
+                    if (sessData.getValue().getTimestamp() < currentTime) {
+                    	it.remove();
+                    	System.out.println(sessData.getKey() + " = " + sessData.getValue());
+                    }
+                    
+                    it.remove(); // avoids a ConcurrentModificationException
+                }
+                
             }
-    	};
-    	viewExchangeThread.start();
+        }, 0, period, TimeUnit.SECONDS);
     }
     
     /**
@@ -446,7 +402,7 @@ public class HelloWorld extends HttpServlet {
 	 * @param period run thread every "period" seconds
 	 **/
     public void startViewExchange(int period) {
-    	System.out.println("=== Start View Exchanger ===");
+    	System.out.println("Start View Exchanger");
     	
     	Thread viewExchangeThread = new Thread() {
             public void run() {
@@ -465,10 +421,6 @@ public class HelloWorld extends HttpServlet {
 	            		String randomBackupServerIP = good_server_list.get(rand);
 	            		good_server_list.remove(rand); // removed server IP that has been chosen
 	            		
-	            		// NOTE!!!! remove this line to test server to server view exchange
-	            		//randomBackupServerIP = "simpleDB";
-	            		
-	            		
 	            		if (randomBackupServerIP.equals("simpleDB")) {
 	                        // Read ViewSDB from SimpleDB.
 	                        // Compute a new merged View, Viewm, from ViewSDB and the current View.
@@ -476,9 +428,8 @@ public class HelloWorld extends HttpServlet {
 	                        // Replace the current View with Viewm.
 	            			
 	            			
-	            			AWSCredentials credentials=new BasicAWSCredentials(
-	            	    			"AKIAJW6MMYVAEV3VWVIQ", "1JgVDeFfZO5dKcVlo4lY3Fbby1bAbq1lOZ759Eqc");
-	            	    	final AmazonSimpleDB sdb = new AmazonSimpleDBClient(credentials);
+	            			final AmazonSimpleDB sdb = new AmazonSimpleDBClient(new PropertiesCredentials(
+	            					HelloWorld.class.getResourceAsStream("AwsCredentials.properties")));
 
 	            			System.out.println("===========================================");
 	            			System.out.println("Getting Started with Amazon SimpleDB");
@@ -516,7 +467,6 @@ public class HelloWorld extends HttpServlet {
                             	.withAttributes(replaceableAttribute));
 	            			
 	            		} else { // normal valid IP address
-	            			System.out.println("exchange with other view");
 	            			mergeViewStringToLocalView(RPCViewExchange(randomBackupServerIP));
 	            		}
 	            		sleep( (view_exchange_period / 2) + random.nextInt(view_exchange_period));
@@ -545,20 +495,12 @@ public class HelloWorld extends HttpServlet {
                     // filters out 127.0.0.1 and inactive interfaces
                     if (iface.isLoopback() || !iface.isUp())
                         continue;
-                    
+    
                     Enumeration<InetAddress> addresses = iface.getInetAddresses();
-                    /*
                     InetAddress addr = addresses.nextElement(); // Get first element (mac address)
                     addr = addresses.nextElement(); // Get second element (ip address)
                     return addr.getHostAddress();
-                    */
-                    while(addresses.hasMoreElements()) {
-                        InetAddress addr = addresses.nextElement();
-                        if (iface.getDisplayName().equals("en0") && addr.getHostAddress().length() < 16) {
-                        	System.out.println(iface.getDisplayName() + " " + addr.getHostAddress());
-                        	return addr.getHostAddress();
-                        }
-                    }
+                    
                     /*
                     while(addresses.hasMoreElements()) {
                         InetAddress addr = addresses.nextElement();
@@ -744,13 +686,10 @@ public class HelloWorld extends HttpServlet {
     	// Send to primary server
     	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(primary_IP), UDP_port);
     	rpcSocket.send(sendPkt);
-    	rpcSocket.setSoTimeout(5000);
     	
     	// Send to backup server
-    	if (backup_IP != "0.0.0.0") {
-    		sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(backup_IP), UDP_port);
-    		rpcSocket.send(sendPkt);
-    	}
+    	sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(backup_IP), UDP_port);
+    	rpcSocket.send(sendPkt);
     	
     	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
     	try {
@@ -771,8 +710,7 @@ public class HelloWorld extends HttpServlet {
     		} while (received_call_ID != local_call_ID && version_num != received_version_num);
     	} catch (SocketTimeoutException stoe) {
     		// RPC timeout, return null string
-    		System.out.println("--- RPCSessionRead timeout return null ---");
-    		group_view.put(backup_IP, new ServerStatus("DOWN", System.currentTimeMillis()));
+    		System.out.println("RPC session read timeout");
     		recvPkt = null;
     	} catch(IOException ioe) {
     		// other error
@@ -805,7 +743,7 @@ public class HelloWorld extends HttpServlet {
     	
     	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(ip), UDP_port);
     	rpcSocket.send(sendPkt);
-    	rpcSocket.setSoTimeout(5000);
+    	
     	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
     	try {
     		do {
@@ -816,8 +754,6 @@ public class HelloWorld extends HttpServlet {
     		} while (received_call_ID != local_call_ID);
     	} catch (SocketTimeoutException stoe) {
     		// timeout
-    		System.out.println("--- RPCSessionWrite timeout return null ---");
-    		group_view.put(ip, new ServerStatus("DOWN", System.currentTimeMillis()));
     		recvPkt = null;
     		return false;
     	} catch(IOException ioe) {
@@ -836,7 +772,6 @@ public class HelloWorld extends HttpServlet {
      * @throws IOException 
 	 **/
     public String RPCViewExchange(String ip) throws IOException {
-    	System.out.println("--- RPCViewExchange called ---");
     	DatagramSocket rpcSocket = new DatagramSocket();
     	byte[] outBuf = new byte[1024];
     	byte[] inBuf = new byte[1024];
@@ -851,7 +786,7 @@ public class HelloWorld extends HttpServlet {
     	
     	DatagramPacket sendPkt = new DatagramPacket(outBuf, outBuf.length, InetAddress.getByName(ip), UDP_port);
     	rpcSocket.send(sendPkt);
-    	rpcSocket.setSoTimeout(5000);
+    	
     	DatagramPacket recvPkt = new DatagramPacket(inBuf, inBuf.length);
     	try {
     		do {
@@ -863,18 +798,12 @@ public class HelloWorld extends HttpServlet {
     		} while (received_call_ID != local_call_ID);
     	} catch (SocketTimeoutException stoe) {
     		// timeout
-    		System.out.println("--- RPCViewExchange timeout return null ---");
-    		System.out.println("     ip = " + ip);
-    		group_view.put(ip, new ServerStatus("DOWN", System.currentTimeMillis()));
     		recvPkt = null;
     		return null;
     	} catch(IOException ioe) {
     		// other error
     	}
     	rpcSocket.close();
-    	System.out.println("--- RPCViewExchange success ---");
-    	System.out.println((return_string.split("_"))[1]);
-    	
     	return (return_string.split("_"))[1];
     }
     
@@ -925,16 +854,12 @@ public class HelloWorld extends HttpServlet {
     }
     
     public void mergeViewStringToLocalView(String viewString) {
-    	if (viewString == null) return;	
     	String[] tokens = viewString.split("_");
     	int num_views = tokens.length / 3;
     	for (int i = 0; i < num_views; i++) {
-    		System.out.println(tokens[i*3]);
-    		System.out.println(tokens[i*3+1]);
-    		System.out.println(tokens[i*3+2]);
     		String ip = tokens[i*3];
     		String status = tokens[i*3+1];
-    		long timeStamp = Long.valueOf(tokens[i*3+2]).longValue();
+    		int timeStamp = Integer.valueOf(tokens[i*3+2]);
     		if (!group_view.containsKey(ip) || group_view.get(ip).getTimeStamp() < timeStamp) {
     			// Add non-exist or out of date view
     			group_view.put(ip, new ServerStatus(status, timeStamp));
