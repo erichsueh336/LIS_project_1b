@@ -15,9 +15,11 @@
 <fullyQualifiedTypeName name="java.lang.Thread"/>
 <fullyQualifiedTypeName name="com.amazonaws.auth.BasicAWSCredentials"/>
 <fullyQualifiedTypeName name="com.amazonaws.auth.AWSCredentials"/>
-<fullyQualifiedTypeName name="com.amazonaws.services.simpledb.model.DeleteDomainRequest"/>
 <fullyQualifiedTypeName name="java.lang.String"/>
 <fullyQualifiedTypeName name="com.cs5300.pj1.SessionData"/>
-<fullyQualifiedTypeName name="java.lang.System"/>
 <fullyQualifiedTypeName name="java.lang.Long"/>
+<fullyQualifiedTypeName name="com.cs5300.pj1.ServerStatus"/>
+<fullyQualifiedTypeName name="java.lang.System"/>
+<fullyQualifiedTypeName name="com.amazonaws.services.simpledb.model.DeleteDomainRequest"/>
+<fullyQualifiedTypeName name="com.cs5300.pj1.HelloWorld"/>
 </qualifiedTypeNameHistroy>

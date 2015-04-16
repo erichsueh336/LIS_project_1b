@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <servers>
-  <server auto-publish-setting="2" auto-publish-time="1" configuration-id="/Servers/Tomcat v7.0 Server at localhost-config" deployDir="wtpwebapps" hostname="localhost" id="Tomcat v7.0 Server at localhost" name="Tomcat v7.0 Server at localhost" runtime-id="Apache Tomcat v7.0" server-type="org.eclipse.jst.server.tomcat.70" server-type-id="org.eclipse.jst.server.tomcat.70" start-timeout="45" stop-timeout="15" testEnvironment="true" timestamp="1">
-    <list key="modules" value0="CS5300PJ1::org.eclipse.jst.jee.server:CS5300PJ1::jst.web::3.0"/>
+  <server auto-publish-setting="2" auto-publish-time="1" configuration-id="/Servers/Tomcat v7.0 Server at localhost-config" deployDir="wtpwebapps" hostname="localhost" id="Tomcat v7.0 Server at localhost" name="Tomcat v7.0 Server at localhost" runtime-id="Apache Tomcat v7.0" server-type="org.eclipse.jst.server.tomcat.70" server-type-id="org.eclipse.jst.server.tomcat.70" start-timeout="45" stop-timeout="15" testEnvironment="true" timestamp="2">
+    <list key="modules" value0="CS5300PJ1::org.eclipse.jst.jee.server:CS5300PJ1::jst.web::3.0" value1="CS5300Project1::org.eclipse.jst.jee.server:CS5300Project1::jst.web::2.5"/>
+  </server>
+  <server accountId="d2a2440d-f0da-4b1a-9205-04e736715104" applicationDescription="" applicationName="CS5300Project1" auto-publish-setting="1" environmentDescription="" environmentName="CS5300Project1" environmentTier="WebServer" environmentType="Load Balanced Web Server Environment" hostname="AWS Elastic Beanstalk - US West (Oregon)" iamRoleName="aws-elasticbeanstalk-ec2-role" id="CS5300Project1 at AWS Elastic Beanstalk - US West (Oregon)" incrementalDeployment="true" name="CS5300Project1 at AWS Elastic Beanstalk - US West (Oregon)" regionId="us-west-2" runtime-id="Apache Tomcat v7.0 in AWS Elastic Beanstalk" server-type="com.amazonaws.eclipse.elasticbeanstalk.servers.tomcat7" server-type-id="com.amazonaws.eclipse.elasticbeanstalk.servers.tomcat7" skipIamRoleAndInstanceProfileCreation="false" solutionStack="64bit Amazon Linux 2014.09 v1.2.0 running Tomcat 7 Java 7" start-timeout="600" stop-timeout="800" timestamp="159">
+    <list key="modules" value0="CS5300Project1::org.eclipse.jst.jee.server:CS5300Project1::jst.web::2.5"/>
   </server>
 </servers>

@@ -12,6 +12,7 @@
 		<item value="false" key="WizardProjectsImportPage.STORE_COPY_PROJECT_ID"/>
 		<item value="false" key="WizardProjectsImportPage.STORE_ARCHIVE_SELECTED"/>
 		<list key="WizardProjectsImportPage.STORE_DIRECTORIES">
+			<item value="/Users/erichsueh336/Desktop/CS5300-Proj1-master/CS5300Project1-Final"/>
 			<item value="/Users/erichsueh336/Documents/Cornell/Courses/Large-Scale_System_CS5300/LIS_project_1b/CS5300PJ1"/>
 		</list>
 		<list key="WizardProjectsImportPage.STORE_ARCHIVES">
