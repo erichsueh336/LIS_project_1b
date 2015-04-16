@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<session version="1.0">
-<refactoring comment="Copy element &apos;AwsCredentials.properties&apos; to &apos;CS5300PJ1/src/com.cs5300.pj1&apos;&#x0A;- Original project: &apos;GossipProtocolTest&apos;&#x0A;- Destination element: &apos;CS5300PJ1/src/com.cs5300.pj1&apos;&#x0A;- Original element: &apos;AwsCredentials.properties&apos;" description="Copy file" destination="=CS5300PJ1/src&lt;com.cs5300.pj1" element1="src/AwsCredentials.properties" files="1" flags="589830" folders="0" id="org.eclipse.jdt.ui.copy" policy="org.eclipse.jdt.ui.copyResources" stamp="1427356987349" units="0" version="1.0"/>
-</session>
